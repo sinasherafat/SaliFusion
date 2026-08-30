@@ -1,12 +1,15 @@
 # SaliFusion AI
 
-SaliFusion AI is a functional medical-imaging proof of concept for a competition demonstration of multimodal salivary-gland assessment. It presents a linear patient → modality → import/review → analysis → clinician-report workflow while clearly separating real image-handling features from simulated diagnostic output.
+SaliFusion AI is a functional medical-imaging proof of concept for a competition demonstration of multimodal salivary-gland assessment. It presents a patient → first modality → import/review → analysis → optional additional modality → automatic fusion → clinician-report workflow while clearly separating real image-handling features from simulated diagnostic output.
 
 This repository is a research and competition prototype. It is not a medical device and must not be used for clinical diagnosis or patient care.
 
 ## What is functional
 
-- Six curated demonstration cases spanning ultrasound, 2D sialography, CBCT, and multimodal workflows.
+- Six curated demonstration cases spanning ultrasound, 2D sialography, and CBCT. Multimodal review starts automatically when a second analyzed modality is added for the same patient.
+- Editable patient name/ID, demographics, symptoms, and free-text clinical history carried into the final report.
+- Ultrasound, 2D Sialography, 3D / CBCT Sialography, and MR Sialography pathways. MR currently has no packaged curated diagnostic case.
+- Deterministic curated-asset recognition by packaged asset or exact filename, with case-specific additional-imaging recommendations.
 - Local import of DICOM Part 10 files and JPG/PNG images.
 - Browser-side DICOM parsing, metadata display, understandable import errors, and grouping by Series Instance UID.
 - Sequential stack navigation and multiple-series selection.
@@ -39,8 +42,8 @@ Browser-compatible transfer syntax support is provided by `@cornerstonejs/dicom-
 - `lib/cornerstone`: lazy browser-only initialization of Cornerstone3D, the DICOM image loader, tools, and cache cleanup.
 - `components/viewers`: isolated Cornerstone stack/MPR viewers plus the JPG/PNG fallback viewer.
 - `data/demo-cases.ts`: the six curated case definitions and their packaged image assets.
-- `services/analysis.ts`: ultrasound, sialography, and multimodal analysis-service interfaces.
-- `services/fusion-service.ts`: concordance/discordance behavior.
+- `services/analysis.ts`: modality-specific curated analysis-service interfaces.
+- `services/fusion-service.ts`: automatic multimodal combination and concordance/discordance behavior.
 - `services/report-service.ts`: structured report creation and clinician review state.
 - `types/salifusion.ts`: shared UI and service contracts.
 

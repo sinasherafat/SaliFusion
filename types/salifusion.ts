@@ -1,20 +1,23 @@
-export type Modality = "ultrasound" | "sialography_2d" | "cbct_3d" | "multimodal";
+export type Modality = "ultrasound" | "sialography_2d" | "cbct_3d" | "mr_sialography";
+export type ResultModality = Modality | "multimodal";
 export type Confidence = "High" | "Moderate" | "Low";
 export type Concordance = "High Concordance" | "Partial Concordance" | "Discordance Detected";
 export type ReviewDecision = "Pending" | "Accepted" | "Modified" | "Rejected";
 
 export interface PatientInfo {
+  patientName: string;
   patientId: string;
   age: string;
   sex: "" | "Female" | "Male" | "Other" | "Not specified";
   gland: "" | "Parotid" | "Submandibular";
   side: "" | "Right" | "Left" | "Bilateral";
   symptoms: string[];
+  clinicalNotes: string;
 }
 
 export interface AnalysisResult {
   caseId: string;
-  modality: Modality;
+  modality: ResultModality;
   isCuratedDemoCase: boolean;
   imageQuality: "Adequate" | "Limited";
   findings: string[];
@@ -25,12 +28,13 @@ export interface AnalysisResult {
   conflictingFindings?: string[];
   confidence: Confidence;
   concordance: Concordance | null;
-  recommendation?: string;
+  additionalImagingRecommendation: string;
+  recommendedNextModality?: Modality;
   demoOnly: true;
 }
 
 export interface DemoAsset {
-  modality: Exclude<Modality, "multimodal">;
+  modality: Modality;
   src: string;
   alt: string;
 }
@@ -42,6 +46,15 @@ export interface DemoCase {
   modality: Modality;
   message: string;
   assets: DemoAsset[];
+  result: AnalysisResult;
+  modalityResults?: Partial<Record<Modality, AnalysisResult>>;
+  fusionResult?: AnalysisResult;
+}
+
+export interface AnalyzedStudy {
+  caseId: string;
+  modality: Modality;
+  asset: DemoAsset;
   result: AnalysisResult;
 }
 
@@ -85,6 +98,7 @@ export interface DicomSeries {
 export interface IntegratedReport {
   patient: PatientInfo;
   clinicalInformation: string[];
+  studies: AnalyzedStudy[];
   result: AnalysisResult;
   reviewDecision: ReviewDecision;
   clinicianNote: string;

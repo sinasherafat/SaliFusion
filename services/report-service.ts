@@ -1,10 +1,11 @@
-import type { AnalysisResult, IntegratedReport, PatientInfo, ReviewDecision } from "@/types/salifusion";
+import type { AnalysisResult, AnalyzedStudy, IntegratedReport, PatientInfo, ReviewDecision } from "@/types/salifusion";
 
 export class ReportService {
-  create(patient: PatientInfo, result: AnalysisResult): IntegratedReport {
+  create(patient: PatientInfo, studies: AnalyzedStudy[], result: AnalysisResult): IntegratedReport {
     return {
       patient,
-      clinicalInformation: patient.symptoms,
+      clinicalInformation: [...patient.symptoms, ...(patient.clinicalNotes.trim() ? [patient.clinicalNotes.trim()] : [])],
+      studies,
       result,
       reviewDecision: "Pending",
       clinicianNote: "",
