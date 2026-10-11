@@ -1,83 +1,34 @@
 import { expect, test } from "@playwright/test";
 
-async function enterPatient(page: import("@playwright/test").Page) {
-  await page.getByLabel("Patient Name").fill("Demo Patient");
-  await page.getByLabel("Patient ID").fill("LOCAL-001");
-  await page.getByLabel("Age").fill("42");
-  await page.getByLabel("Sex").selectOption("Female");
-  await page.getByLabel("Gland").selectOption("Parotid");
-  await page.getByLabel("Side").selectOption("Left");
-  await page.getByText("Meal-related symptoms", { exact: true }).click();
-  await page.getByLabel("Clinical History / Notes").fill("Recurrent meal-related swelling for six months.");
-  await page.getByRole("button", { name: "Continue to modality" }).click();
-}
-
-test("manual single-modality workflow carries patient data and recommendation into the report", async ({ page }) => {
+test("guided competition path resolves an ultrasound-negative obstruction", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Start New Analysis" }).click();
-  await enterPatient(page);
-
-  const cards = page.locator(".modality-card");
-  await expect(cards).toHaveCount(4);
-  await expect(cards.nth(0)).toContainText("Ultrasound");
-  await expect(cards.nth(1)).toContainText("2D Sialography");
-  await expect(cards.nth(2)).toContainText("3D / CBCT Sialography");
-  await expect(cards.nth(3)).toContainText("MR Sialography");
-  await expect(page.getByRole("button", { name: /Multimodal Analysis/ })).toHaveCount(0);
-
-  await cards.nth(0).click();
-  await page.getByRole("button", { name: "Continue to image import" }).click();
-  await page.getByRole("button", { name: /Ultrasound-Sufficient Stone/ }).click();
-  await expect(page.getByText("Curated image recognized")).toBeVisible();
-  await page.getByRole("button", { name: "Run AI Analysis" }).click();
-  await expect(page.getByText("Additional Imaging Recommendation")).toBeVisible();
-  await expect(page.getByText(/No additional imaging is required/)).toBeVisible();
-  await page.getByRole("button", { name: "Generate Report" }).click();
-  await expect(page.getByText("Single-modality imaging report · proof of concept")).toBeVisible();
-  await expect(page.getByText("Demo Patient", { exact: true })).toBeVisible();
-  await expect(page.getByText("Recurrent meal-related swelling for six months.")).toBeVisible();
-});
-
-test("adding a second modality automatically starts fusion and creates an integrated report", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Open Demo Case" }).click();
-  await page.getByRole("button", { name: /Ball-in-hand lesion/ }).click();
-  await expect(page.getByText("Curated reference image")).toBeVisible();
-  await page.getByRole("button", { name: "Run AI Analysis" }).click();
-  await expect(page.getByText(/Ultrasound is recommended for lesion characterization/)).toBeVisible();
-  await page.getByRole("button", { name: "Add Another Modality" }).click();
-  await page.locator(".modality-card").filter({ hasText: "Ultrasound" }).click();
-  await page.getByRole("button", { name: "Continue to image import" }).click();
-  await page.getByRole("button", { name: /Ball-in-hand lesion/ }).click();
-  await page.getByRole("button", { name: "Run AI Analysis" }).click();
+  await page.getByRole("button", { name: /Run competition demo/ }).click();
+  await expect(page.getByText("Competition Demo", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Next step" }).click();
+  await expect(page.getByRole("heading", { name: "Ultrasound" })).toBeVisible();
+  await page.getByRole("button", { name: "Next step" }).click();
+  await expect(page.getByText("Inconclusive ultrasound in a clinically obstructive presentation").first()).toBeVisible();
+  await page.getByRole("button", { name: "Next step" }).click();
+  await expect(page.getByRole("heading", { name: "2D Sialography" })).toBeVisible();
+  await page.getByRole("button", { name: "Next step" }).click();
+  await expect(page.getByText("Proximal Stensen duct stenosis", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Next step" }).click();
   await expect(page.getByText("Automatic fusion active")).toBeVisible();
-  await expect(page.locator(".result-summary").getByText("High Concordance", { exact: true })).toBeVisible();
-  await expect(page.getByText("Integrated assessment")).toBeVisible();
-  await page.getByRole("button", { name: "Generate Integrated Report" }).click();
-  await expect(page.getByText("Integrated imaging report · proof of concept")).toBeVisible();
-  await expect(page.getByText("Cross-modal concordance / discordance")).toBeVisible();
-  await page.getByRole("button", { name: "Accept" }).click();
-  await expect(page.getByText("Accepted", { exact: true })).toBeVisible();
+  await expect(page.getByText(/stenosis occult on ultrasound/i)).toBeVisible();
 });
 
-test("MR pathway exists without a fabricated curated result", async ({ page }) => {
+test("acute infection case prevents an unsafe sialography recommendation", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Start New Analysis" }).click();
-  await enterPatient(page);
-  await page.locator(".modality-card").filter({ hasText: "MR Sialography" }).click();
-  await page.getByRole("button", { name: "Continue to image import" }).click();
-  await expect(page.getByText("No predefined demo case is currently packaged for MR Sialography.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Run AI Analysis" })).toBeDisabled();
+  await page.getByRole("button", { name: "Open safety-stop case" }).click();
+  await expect(page.getByText(/Routine retrograde contrast sialography is inappropriate/i).first()).toBeVisible();
+  await expect(page.getByText("Currently inappropriate").first()).toBeVisible();
 });
 
-test("arbitrary fallback image can be viewed but cannot be diagnosed", async ({ page }) => {
+test("standalone 2D sialography exposes missing phase states", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Start New Analysis" }).click();
-  await enterPatient(page);
-  await page.locator(".modality-card").filter({ hasText: "Ultrasound" }).click();
-  await page.getByRole("button", { name: "Continue to image import" }).click();
-  await page.locator('input[type="file"]').setInputFiles({ name: "local.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") });
-  await expect(page.getByText("Image loaded successfully.")).toBeVisible();
-  await expect(page.getByText("AI inference is currently available only for curated demonstration cases.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Run AI Analysis" })).toBeDisabled();
+  await page.getByRole("button", { name: "Open workstation" }).click();
+  await page.getByLabel("Educational case").selectOption("distal-wharton-calculus");
+  await page.getByRole("button", { name: /2D Sialography/ }).first().click();
+  await expect(page.getByText("Partial studies are supported")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Evacuation Not supplied/ })).toBeDisabled();
 });

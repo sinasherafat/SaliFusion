@@ -1,8 +1,11 @@
-export type Modality = "ultrasound" | "sialography_2d" | "cbct_3d" | "mr_sialography";
+export type Modality = "ultrasound" | "sialography_2d" | "cbct_3d";
 export type ResultModality = Modality | "multimodal";
 export type Confidence = "High" | "Moderate" | "Low";
 export type Concordance = "High Concordance" | "Partial Concordance" | "Discordance Detected";
 export type ReviewDecision = "Pending" | "Accepted" | "Modified" | "Rejected";
+export type SialographyPhase = "Precontrast" | "Ductal filling" | "Acinar / parenchymal filling" | "Evacuation";
+export type RecommendationPriority = "Preferred" | "Optional" | "Currently inappropriate";
+export type AssetKind = "clinical-reference" | "synthetic-schematic";
 
 export interface PatientInfo {
   patientName: string;
@@ -11,8 +14,29 @@ export interface PatientInfo {
   sex: "" | "Female" | "Male" | "Other" | "Not specified";
   gland: "" | "Parotid" | "Submandibular";
   side: "" | "Right" | "Left" | "Bilateral";
+  symptomCourse: "" | "Acute" | "Chronic" | "Recurrent";
   symptoms: string[];
+  history: string[];
+  medications: string;
+  serology: string;
+  contrastReaction: "" | "None known" | "Previous mild reaction" | "Previous severe reaction" | "Unknown";
   clinicalNotes: string;
+}
+
+export interface ImagingRecommendation {
+  modality: string;
+  priority: RecommendationPriority;
+  rationale: string;
+  expectedContribution: string;
+  safety: string;
+  alternatives: string[];
+}
+
+export interface DuctMapItem {
+  structure: string;
+  location: string;
+  finding: string;
+  extent?: string;
 }
 
 export interface AnalysisResult {
@@ -20,16 +44,21 @@ export interface AnalysisResult {
   modality: ResultModality;
   isCuratedDemoCase: boolean;
   imageQuality: "Adequate" | "Limited";
-  findings: string[];
+  observedFindings: string[];
+  patternInterpretations: string[];
   assessment: string;
   differentials: string[];
-  supportingFeatures: string[];
+  supportingClinicalInformation: string[];
+  missingEvidence: string[];
+  limitations: string[];
+  ductMap?: DuctMapItem[];
+  phasesAvailable?: SialographyPhase[];
   complementaryFindings?: string[];
   conflictingFindings?: string[];
   confidence: Confidence;
   concordance: Concordance | null;
-  additionalImagingRecommendation: string;
-  recommendedNextModality?: Modality;
+  recommendations: ImagingRecommendation[];
+  safetyNotices: string[];
   demoOnly: true;
 }
 
@@ -37,18 +66,22 @@ export interface DemoAsset {
   modality: Modality;
   src: string;
   alt: string;
+  kind: AssetKind;
+  sourceLabel: string;
+  phase?: SialographyPhase;
 }
 
 export interface DemoCase {
   id: string;
   title: string;
   shortTitle: string;
-  modality: Modality;
-  message: string;
+  summary: string;
+  initialModality: Modality;
+  patient: PatientInfo;
   assets: DemoAsset[];
-  result: AnalysisResult;
-  modalityResults?: Partial<Record<Modality, AnalysisResult>>;
+  modalityResults: Partial<Record<Modality, AnalysisResult>>;
   fusionResult?: AnalysisResult;
+  competitionRole?: "high-impact" | "safety-stop";
 }
 
 export interface AnalyzedStudy {
@@ -56,6 +89,7 @@ export interface AnalyzedStudy {
   modality: Modality;
   asset: DemoAsset;
   result: AnalysisResult;
+  patientKey: string;
 }
 
 export interface DicomMetadata {
@@ -103,4 +137,8 @@ export interface IntegratedReport {
   reviewDecision: ReviewDecision;
   clinicianNote: string;
   generatedAt: string;
+}
+
+export function patientStudyKey(patient: PatientInfo) {
+  return [patient.patientId.trim().toLowerCase(), patient.gland, patient.side].join("|");
 }

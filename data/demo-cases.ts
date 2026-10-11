@@ -1,132 +1,100 @@
-import type { DemoAsset, DemoCase, Modality } from "@/types/salifusion";
+import type { AnalysisResult, DemoAsset, DemoCase, ImagingRecommendation, Modality, PatientInfo, SialographyPhase } from "@/types/salifusion";
+
+const phases: SialographyPhase[] = ["Precontrast", "Ductal filling", "Acinar / parenchymal filling", "Evacuation"];
+const reference = "Curated educational reference — confirm source permission before public use";
+const synthetic = "Synthetic educational schematic — not patient data";
+
+function patient(id: string, age: string, sex: PatientInfo["sex"], gland: PatientInfo["gland"], side: PatientInfo["side"], course: PatientInfo["symptomCourse"], symptoms: string[], history: string[] = [], notes = ""): PatientInfo {
+  return { patientName: "Demo patient", patientId: id, age, sex, gland, side, symptomCourse: course, symptoms, history, medications: "", serology: "", contrastReaction: "None known", clinicalNotes: notes };
+}
+
+function recommendation(modality: string, priority: ImagingRecommendation["priority"], rationale: string, contribution: string, safety: string, alternatives: string[]): ImagingRecommendation {
+  return { modality, priority, rationale, expectedContribution: contribution, safety, alternatives };
+}
+
+function result(input: Omit<AnalysisResult, "isCuratedDemoCase" | "imageQuality" | "demoOnly" | "concordance" | "confidence" | "limitations" | "safetyNotices"> & Partial<Pick<AnalysisResult, "imageQuality" | "concordance" | "confidence" | "limitations" | "safetyNotices">>): AnalysisResult {
+  return { isCuratedDemoCase: true, imageQuality: "Adequate", demoOnly: true, concordance: null, confidence: "Moderate", limitations: ["Deterministic educational output; no trained model inference has been performed."], safetyNotices: [], ...input };
+}
+
+const us = (src: string, alt: string, kind: DemoAsset["kind"] = "clinical-reference"): DemoAsset => ({ modality: "ultrasound", src, alt, kind, sourceLabel: kind === "clinical-reference" ? reference : synthetic });
+const sio = (src: string, alt: string, phase: SialographyPhase = "Ductal filling", kind: DemoAsset["kind"] = "clinical-reference"): DemoAsset => ({ modality: "sialography_2d", src, alt, phase, kind, sourceLabel: kind === "clinical-reference" ? reference : synthetic });
+const cbct = (src: string, alt: string, kind: DemoAsset["kind"] = "clinical-reference"): DemoAsset => ({ modality: "cbct_3d", src, alt, kind, sourceLabel: kind === "clinical-reference" ? reference : synthetic });
 
 export const DEMO_CASES: DemoCase[] = [
   {
-    id: "space-occupying-lesion",
-    title: "Case 1 — Space-Occupying Lesion",
-    shortTitle: "Ball-in-hand lesion",
-    modality: "sialography_2d",
-    message: "Begin with the ball-in-hand sialogram, then add ultrasound to characterize the lesion automatically.",
-    assets: [
-      { modality: "sialography_2d", src: "/demo-cases/ball-in-hand-sialography.jpg", alt: "Sialography showing ball-in-hand ductal displacement" },
-      { modality: "ultrasound", src: "/demo-cases/tumor-ultrasound.jpg", alt: "Ultrasound demonstrating a well-defined solid salivary lesion" },
-    ],
-    result: {
-      caseId: "space-occupying-lesion", modality: "sialography_2d", isCuratedDemoCase: true, imageQuality: "Adequate",
-      findings: ["Ductal displacement with ball-in-hand appearance", "Localized mass effect on the salivary ductal system"],
-      assessment: "Space-occupying salivary gland lesion with sialographic mass effect",
-      differentials: ["Benign salivary gland tumor", "Salivary cyst"],
-      supportingFeatures: ["Ball-in-hand ductal displacement pattern", "Preserved surrounding ductal opacification"],
-      confidence: "Moderate", concordance: null,
-      additionalImagingRecommendation: "Ultrasound is recommended for lesion characterization and differentiation of solid versus cystic composition.",
-      recommendedNextModality: "ultrasound", demoOnly: true,
-    },
+    id: "normal-anatomy", title: "Normal salivary gland and ductal anatomy", shortTitle: "Normal anatomy", summary: "Independent ultrasound assessment with a complete, normal four-phase ductal reference.", initialModality: "ultrasound",
+    patient: patient("DEMO-001", "31", "Female", "Parotid", "Right", "Chronic", ["Intermittent awareness"], [], "No focal mass, discharge, or meal-related pain."),
+    assets: [us("/demo-cases/normal-ultrasound.svg", "Synthetic normal parotid ultrasound schematic", "synthetic-schematic"), sio("/demo-cases/normal-sialography.svg", "Synthetic normal branching ductal schematic", "Ductal filling", "synthetic-schematic")],
     modalityResults: {
-      ultrasound: {
-        caseId: "space-occupying-lesion", modality: "ultrasound", isCuratedDemoCase: true, imageQuality: "Adequate",
-        findings: ["Well-defined solid salivary lesion", "Predominantly hypoechoic internal echotexture", "Benign-appearing circumscribed margin"],
-        assessment: "Solid salivary gland lesion with benign-appearing ultrasound features",
-        differentials: ["Pleomorphic adenoma", "Other benign solid salivary lesion"],
-        supportingFeatures: ["Solid rather than cystic morphology", "Well-defined margin"],
-        confidence: "Moderate", concordance: null,
-        additionalImagingRecommendation: "No additional imaging is required for this curated combined demonstration after correlation with the sialogram.",
-        demoOnly: true,
-      },
-    },
-    fusionResult: {
-      caseId: "space-occupying-lesion", modality: "multimodal", isCuratedDemoCase: true, imageQuality: "Adequate",
-      findings: ["Sialography demonstrates ball-in-hand ductal displacement", "Ultrasound demonstrates a well-defined solid lesion"],
-      assessment: "Space-occupying salivary gland lesion with a benign-appearing solid tumor differential",
-      differentials: ["Pleomorphic adenoma", "Other benign solid salivary lesion"],
-      supportingFeatures: ["Concordant sialographic mass effect", "Solid rather than cystic ultrasound morphology"],
-      complementaryFindings: ["Ultrasound adds tissue composition to the sialographic localization pattern"],
-      conflictingFindings: [], confidence: "High", concordance: "High Concordance",
-      additionalImagingRecommendation: "No further modality is required in this curated demonstration after integrated sialography and ultrasound review.",
-      demoOnly: true,
+      ultrasound: result({ caseId: "normal-anatomy", modality: "ultrasound", observedFindings: ["Normal gland size and homogeneous echotexture", "No focal lesion, ductal dilatation, calculus, or suspicious lymph node"], patternInterpretations: ["No abnormal sonographic pattern identified"], assessment: "No focal sonographic abnormality in this educational example", differentials: [], supportingClinicalInformation: ["No obstructive or infective symptoms"], missingEvidence: ["No genuine Doppler dataset supplied"], recommendations: [recommendation("No additional imaging", "Optional", "The examination answers the current low-risk question.", "None expected without a new clinical indication.", "Clinical review remains required if symptoms persist.", ["Clinical follow-up"]) ] }),
+      sialography_2d: result({ caseId: "normal-anatomy", modality: "sialography_2d", observedFindings: ["Smooth main duct with orderly secondary and tertiary branching", "No stenosis, filling defect, sialectasis, or contrast retention"], patternInterpretations: ["Normal arborizing ductal pattern"], assessment: "Normal educational sialographic pattern", differentials: [], supportingClinicalInformation: ["No acute infection symptoms"], missingEvidence: [], phasesAvailable: phases, ductMap: [{ structure: "Stensen duct", location: "Main duct", finding: "Patent and smooth" }, { structure: "Peripheral branches", location: "Intraglandular", finding: "Orderly arborization" }], recommendations: [recommendation("No additional imaging", "Optional", "A complete normal ductal study is available.", "None expected.", "Avoid additional radiation or contrast without indication.", ["Clinical follow-up"]) ] }),
     },
   },
   {
-    id: "sialolith-sialography",
-    title: "Case 2 — Sialolithiasis: Sialography-Dominant",
-    shortTitle: "Sialography-Dominant Stone",
-    modality: "sialography_2d",
-    message: "A ductal obstruction pattern demonstrates the value of sialography when a calculus is poorly conspicuous elsewhere.",
-    assets: [{ modality: "sialography_2d", src: "/demo-cases/sialolith-sialography.jpg", alt: "Sialography showing obstructive ductal abnormality" }],
-    result: {
-      caseId: "sialolith-sialography", modality: "sialography_2d", isCuratedDemoCase: true, imageQuality: "Adequate",
-      findings: ["Ductal filling abnormality", "Obstruction with proximal ductal dilatation", "Secondary sialectatic and inflammatory change"],
-      assessment: "Sialolithiasis with obstructive changes and secondary sialadenitis",
-      differentials: ["Ductal stricture"], supportingFeatures: ["Abrupt filling abnormality", "Upstream ductal dilatation"],
-      confidence: "High", concordance: null,
-      additionalImagingRecommendation: "No additional imaging is required in this demonstration; ultrasound may be added if direct calculus localization is clinically desired.",
-      demoOnly: true,
+    id: "distal-wharton-calculus", title: "Distal Wharton’s duct calculus", shortTitle: "Distal duct calculus", summary: "Ultrasound independently localizes an echogenic obstructing focus with acoustic shadowing.", initialModality: "ultrasound",
+    patient: patient("DEMO-002", "42", "Male", "Submandibular", "Left", "Recurrent", ["Meal-related swelling or pain", "Recurrent swelling"], ["Previous salivary stone"], "Tenderness along the distal floor of mouth."),
+    assets: [us("/demo-cases/sialolith-ultrasound.jpg", "Ultrasound reference showing a distal salivary calculus"), sio("/demo-cases/sialolith-sialography.jpg", "Sialography reference showing an obstructive filling defect")],
+    modalityResults: {
+      ultrasound: result({ caseId: "distal-wharton-calculus", modality: "ultrasound", observedFindings: ["Echogenic distal duct focus with clean posterior acoustic shadowing", "Mild upstream ductal dilatation"], patternInterpretations: ["Obstructing calculus pattern"], assessment: "Distal Wharton’s duct calculus", differentials: ["Calcified ductal debris"], supportingClinicalInformation: ["Meal-related pain and recurrent swelling"], missingEvidence: ["No Doppler data supplied"], ductMap: [{ structure: "Wharton duct", location: "Distal third", finding: "Echogenic calculus with obstruction" }], recommendations: [recommendation("Further ductal imaging", "Optional", "Ultrasound already localizes the culprit lesion.", "May assist procedural planning only if required.", "Retrograde injection can displace an obstructing stone.", ["Sialendoscopy", "Noncontrast CT / CBCT"]) ] }),
+      sialography_2d: result({ caseId: "distal-wharton-calculus", modality: "sialography_2d", observedFindings: ["Distal filling defect with abrupt obstruction", "Upstream ductal dilatation"], patternInterpretations: ["Obstructive ductal pattern compatible with calculus"], assessment: "Distal obstructive filling defect", differentials: ["Ductal stricture", "Inspissated debris"], supportingClinicalInformation: ["Meal-related symptoms"], missingEvidence: ["Precontrast phase not supplied", "Evacuation cannot be assessed"], phasesAvailable: ["Ductal filling"], ductMap: [{ structure: "Wharton duct", location: "Distal third", finding: "Filling defect", extent: "Focal" }], recommendations: [recommendation("Sialendoscopy", "Preferred", "Direct evaluation can confirm and potentially treat the distal obstruction.", "Localization and treatment planning.", "Account for possible stone displacement during retrograde injection.", ["Noncontrast CT / CBCT", "Targeted ultrasound"]) ] }),
     },
   },
   {
-    id: "sialolith-ultrasound",
-    title: "Case 3 — Sialolithiasis: Ultrasound Sufficient",
-    shortTitle: "Ultrasound-Sufficient Stone",
-    modality: "ultrasound",
-    message: "Ultrasound demonstrates a distal calculus with shadowing; additional sialography is not required in this case.",
-    assets: [{ modality: "ultrasound", src: "/demo-cases/sialolith-ultrasound.jpg", alt: "Ultrasound showing a distal salivary calculus" }],
-    result: {
-      caseId: "sialolith-ultrasound", modality: "ultrasound", isCuratedDemoCase: true, imageQuality: "Adequate",
-      findings: ["Hyperechoic focus", "Posterior acoustic shadowing", "Adjacent ductal dilatation"],
-      assessment: "Distal sialolithiasis", differentials: ["Calcified ductal debris"],
-      supportingFeatures: ["Echogenic focus with clean posterior shadow", "Dilated adjacent duct"],
-      confidence: "High", concordance: null,
-      additionalImagingRecommendation: "No additional imaging is required; ultrasound findings are sufficient for this demonstration case.",
-      demoOnly: true,
+    id: "occult-obstruction", title: "Occult obstruction with negative ultrasound", shortTitle: "Occult obstruction", summary: "High-impact workflow: nonspecific ultrasound, then dedicated ductal imaging reveals a clinically meaningful stenosis.", initialModality: "ultrasound", competitionRole: "high-impact",
+    patient: patient("DEMO-003", "38", "Female", "Parotid", "Left", "Recurrent", ["Meal-related swelling or pain", "Recurrent swelling"], [], "Three episodes over eight months; no fever or purulent discharge."),
+    assets: [us("/demo-cases/negative-ultrasound.svg", "Synthetic nonspecific parotid ultrasound schematic", "synthetic-schematic"), sio("/demo-cases/stenosis-sialography.svg", "Synthetic sialogram showing proximal stenosis", "Ductal filling", "synthetic-schematic")],
+    modalityResults: {
+      ultrasound: result({ caseId: "occult-obstruction", modality: "ultrasound", observedFindings: ["No visible calculus", "No focal mass or drainable collection", "Mild nonspecific duct prominence"], patternInterpretations: ["Ultrasound does not explain the persistent obstructive symptoms"], assessment: "Inconclusive ultrasound in a clinically obstructive presentation", differentials: ["Occult ductal stenosis", "Small nonvisualized calculus", "Mucous plug"], supportingClinicalInformation: ["Recurrent meal-related swelling"], missingEvidence: ["Main duct lumen not fully visualized", "No direct assessment of evacuation"], confidence: "Low", recommendations: [recommendation("Dedicated ductal assessment", "Preferred", "Persistent obstruction remains unresolved despite negative ultrasound.", "Map an occult stenosis, filling defect, branch abnormality, or evacuation delay.", "Confirm absence of acute infection before contrast sialography.", ["Sialendoscopy", "MR sialography", "Noncontrast CT / CBCT"]) ] }),
+      sialography_2d: result({ caseId: "occult-obstruction", modality: "sialography_2d", observedFindings: ["Short proximal main-duct stenosis", "Mild post-stenotic dilatation", "Delayed evacuation on the supplied phase"], patternInterpretations: ["Fixed obstructive ductal narrowing"], assessment: "Proximal Stensen duct stenosis", differentials: ["Post-inflammatory stricture", "Sialodochitis"], supportingClinicalInformation: ["Meal-related swelling with negative ultrasound"], missingEvidence: ["Acinar phase not supplied"], phasesAvailable: ["Precontrast", "Ductal filling", "Evacuation"], ductMap: [{ structure: "Stensen duct", location: "Proximal main duct", finding: "Stenosis", extent: "Short segment" }, { structure: "Stensen duct", location: "Immediately distal to stenosis", finding: "Post-stenotic dilatation" }], recommendations: [recommendation("Sialendoscopy", "Preferred", "A focal stenosis is mapped and may be amenable to direct evaluation.", "Confirm morphology and permit intervention.", "Proceed according to local ductal intervention protocol.", ["MR sialography", "Clinical follow-up if symptoms are mild"]) ] }),
+    },
+    fusionResult: result({ caseId: "occult-obstruction", modality: "multimodal", observedFindings: ["Ultrasound excludes a visible calculus, mass, and abscess", "Sialography maps a short proximal stenosis with delayed evacuation"], patternInterpretations: ["Complementary modalities resolve the previously unanswered ductal question"], assessment: "Clinically relevant proximal Stensen duct stenosis occult on ultrasound", differentials: ["Post-inflammatory stricture", "Sialodochitis"], supportingClinicalInformation: ["Recurrent meal-related swelling"], missingEvidence: ["No endoscopic confirmation"], complementaryFindings: ["Ultrasound provides gland and soft-tissue assessment", "Sialography provides luminal and evacuation detail"], conflictingFindings: [], confidence: "High", concordance: "High Concordance", ductMap: [{ structure: "Stensen duct", location: "Proximal main duct", finding: "Stenosis", extent: "Short segment" }], recommendations: [recommendation("Sialendoscopy", "Preferred", "The cross-modal result localizes a treatable ductal lesion.", "Direct confirmation and potential dilation.", "Clinician selection remains required.", ["MR sialography", "Conservative management based on symptom severity"]) ] }),
+  },
+  {
+    id: "long-segment-stenosis", title: "Long-segment ductal stenosis", shortTitle: "Long-segment stenosis", summary: "Standalone 2D ductal mapping with optional true-volume CBCT import for spatial assessment.", initialModality: "sialography_2d",
+    patient: patient("DEMO-004", "54", "Female", "Parotid", "Right", "Chronic", ["Meal-related swelling or pain", "Recurrent swelling"], ["Previous ductal procedure"], "Progressive obstructive symptoms."),
+    assets: [sio("/demo-cases/stenosis-sialography.svg", "Synthetic long-segment ductal stenosis schematic", "Ductal filling", "synthetic-schematic"), cbct("/demo-cases/stenosis-cbct.svg", "Synthetic spatial duct-map reference", "synthetic-schematic")],
+    modalityResults: {
+      sialography_2d: result({ caseId: "long-segment-stenosis", modality: "sialography_2d", observedFindings: ["Irregular long-segment narrowing of the main duct", "Reduced filling of downstream secondary branches"], patternInterpretations: ["Long-segment inflammatory stricture pattern"], assessment: "Long-segment Stensen duct stenosis", differentials: ["Chronic obstructive sialadenitis", "Sialodochitis"], supportingClinicalInformation: ["Chronic meal-related swelling", "Previous ductal intervention"], missingEvidence: ["Evacuation phase not supplied"], phasesAvailable: ["Precontrast", "Ductal filling", "Acinar / parenchymal filling"], ductMap: [{ structure: "Stensen duct", location: "Middle and proximal thirds", finding: "Irregular stenosis", extent: "Long segment" }], recommendations: [recommendation("Sialendoscopy ± cross-sectional ductal mapping", "Preferred", "Long-segment disease may affect intervention strategy.", "Define extent and feasibility of treatment.", "Review prior procedural records.", ["CBCT sialography", "MR sialography"]) ] }),
+      cbct_3d: result({ caseId: "long-segment-stenosis", modality: "cbct_3d", observedFindings: ["Spatially extensive main-duct narrowing", "Segmental upstream branch ectasia"], patternInterpretations: ["Long-segment obstructive ductal disease"], assessment: "Three-dimensional distribution of long-segment ductal stenosis", differentials: ["Chronic obstructive sialadenitis"], supportingClinicalInformation: ["Prior ductal procedure"], missingEvidence: ["Curated image is schematic; real MPR requires a spatially valid DICOM series"], ductMap: [{ structure: "Stensen duct", location: "Middle to hilar segment", finding: "Stenosis with upstream ectasia", extent: "Long segment" }], recommendations: [recommendation("Specialist ductal intervention review", "Preferred", "Spatial extent may influence approach.", "Treatment planning.", "Do not infer measurements from the schematic reference.", ["Sialendoscopy", "MR sialography"]) ] }),
     },
   },
   {
-    id: "sjogren-ultrasound",
-    title: "Case 4 — Sjögren Pattern on Ultrasound",
-    shortTitle: "Sjögren Ultrasound Pattern",
-    modality: "ultrasound",
-    message: "Heterogeneous glandular parenchyma with multiple hypoechoic areas.",
-    assets: [{ modality: "ultrasound", src: "/demo-cases/sjogren-ultrasound.jpg", alt: "Ultrasound showing heterogeneous salivary gland parenchyma" }],
-    result: {
-      caseId: "sjogren-ultrasound", modality: "ultrasound", isCuratedDemoCase: true, imageQuality: "Adequate",
-      findings: ["Heterogeneous glandular parenchyma", "Multiple hypoechoic areas"],
-      assessment: "Sjögren-related glandular pattern", differentials: ["Chronic inflammatory sialadenitis"],
-      supportingFeatures: ["Diffuse parenchymal heterogeneity", "Scattered hypoechoic foci"],
-      confidence: "Moderate", concordance: null,
-      additionalImagingRecommendation: "A ductal modality such as 2D sialography may provide complementary information if clinically desired.",
-      recommendedNextModality: "sialography_2d", demoOnly: true,
+    id: "sjogren-pattern", title: "Sjögren-pattern glandular and ductal abnormalities", shortTitle: "Sjögren pattern", summary: "Ultrasound and sialography provide complementary, non-definitive evidence requiring clinical and laboratory correlation.", initialModality: "ultrasound",
+    patient: patient("DEMO-005", "49", "Female", "Parotid", "Bilateral", "Chronic", ["Xerostomia", "Xerophthalmia"], ["Autoimmune disorder / serology"], "Dryness for two years; serology pending."),
+    assets: [us("/demo-cases/sjogren-ultrasound.jpg", "Ultrasound reference showing heterogeneous glandular parenchyma"), sio("/demo-cases/sjogren-2d-sialography.jpg", "Sialography reference showing sialectatic change", "Acinar / parenchymal filling"), cbct("/demo-cases/sjogren-cbct-reference.jpg", "Curated CBCT sialography reference montage")],
+    modalityResults: {
+      ultrasound: result({ caseId: "sjogren-pattern", modality: "ultrasound", observedFindings: ["Diffuse heterogeneous echotexture", "Scattered small hypoechoic areas", "No focal dominant mass"], patternInterpretations: ["Chronic inflammatory or autoimmune-associated glandular pattern"], assessment: "Glandular pattern compatible with chronic inflammatory involvement", differentials: ["Sjögren disease", "IgG4-related sialadenitis", "Other chronic sialadenitis"], supportingClinicalInformation: ["Xerostomia and xerophthalmia"], missingEvidence: ["Serology and classification criteria", "No genuine Doppler dataset supplied"], recommendations: [recommendation("Clinical and laboratory autoimmune assessment", "Preferred", "Imaging pattern is supportive but not diagnostic.", "Establish systemic disease evidence and exclude mimics.", "Do not automatically recommend contrast sialography solely because of ultrasound findings.", ["Relevant serology", "Schirmer testing", "Minor salivary gland biopsy when indicated"]) ] }),
+      sialography_2d: result({ caseId: "sjogren-pattern", modality: "sialography_2d", observedFindings: ["Punctate and globular sialectasis", "Reduced peripheral branching visibility"], patternInterpretations: ["Chronic inflammatory sialectatic pattern"], assessment: "Ductal and acinar abnormalities compatible with Sjögren-related involvement", differentials: ["Sjögren disease", "Chronic inflammatory sialadenitis"], supportingClinicalInformation: ["Ocular and oral dryness"], missingEvidence: ["Evacuation phase not supplied", "Clinical and laboratory confirmation"], phasesAvailable: ["Ductal filling", "Acinar / parenchymal filling"], ductMap: [{ structure: "Peripheral ductal system", location: "Diffuse intraglandular", finding: "Punctate and globular sialectasis" }], recommendations: [recommendation("Clinical / laboratory correlation", "Preferred", "Characteristic patterns are not a stand-alone diagnosis.", "Determine whether systemic autoimmune criteria are met.", "Avoid overcalling histology from ductal imaging.", ["Ultrasound", "Serology", "Minor salivary gland biopsy when indicated"]) ] }),
+      cbct_3d: result({ caseId: "sjogren-pattern", modality: "cbct_3d", observedFindings: ["Multifocal spatial sialectatic involvement", "Peripheral ductal irregularity"], patternInterpretations: ["Diffuse chronic inflammatory ductal pattern"], assessment: "Three-dimensional ductal abnormalities compatible with autoimmune-related involvement", differentials: ["Sjögren disease", "Chronic inflammatory sialadenitis"], supportingClinicalInformation: ["Bilateral dryness symptoms"], missingEvidence: ["Reference montage is not a true DICOM volume", "Clinical and laboratory confirmation"], recommendations: [recommendation("No automatic additional imaging", "Optional", "The next decisive evidence is clinical and laboratory rather than another image.", "Limited added value without a new question.", "Use genuine DICOM for measurements and MPR.", ["Serology", "Specialist rheumatology assessment"]) ] }),
+    },
+    fusionResult: result({ caseId: "sjogren-pattern", modality: "multimodal", observedFindings: ["Ultrasound shows diffuse heterogeneity and hypoechoic foci", "Sialography shows punctate and globular sialectasis"], patternInterpretations: ["Complementary glandular and ductal chronic inflammatory pattern"], assessment: "Combined findings may support autoimmune or chronic inflammatory salivary disease", differentials: ["Sjögren disease", "IgG4-related sialadenitis", "Other chronic sialadenitis"], supportingClinicalInformation: ["Xerostomia and xerophthalmia"], missingEvidence: ["Serology", "Systemic classification criteria", "Histopathology when indicated"], complementaryFindings: ["Ultrasound characterizes parenchyma", "Sialography characterizes ductal and acinar change"], conflictingFindings: [], confidence: "Moderate", concordance: "High Concordance", recommendations: [recommendation("Clinical and laboratory autoimmune pathway", "Preferred", "Imaging is supportive but not definitive.", "Establish the cause and systemic context.", "No validated diagnostic probability is presented.", ["Serology", "Schirmer testing", "Biopsy when indicated"]) ] }),
+  },
+  {
+    id: "kussmaul-like", title: "Kussmaul-like recurrent ductal disease", shortTitle: "Kussmaul-like disease", summary: "Thick mucous discharge and negative ultrasound trigger dedicated ductal evaluation without asserting a definitive rare diagnosis.", initialModality: "ultrasound",
+    patient: patient("DEMO-006", "36", "Male", "Parotid", "Right", "Recurrent", ["Recurrent swelling", "Thick mucous discharge", "Meal-related swelling or pain"], [], "Ultrasound previously unrevealing."),
+    assets: [us("/demo-cases/negative-ultrasound.svg", "Synthetic unrevealing ultrasound schematic", "synthetic-schematic"), sio("/demo-cases/kussmaul-sialography.svg", "Synthetic ductal cast and stenosis schematic", "Ductal filling", "synthetic-schematic")],
+    modalityResults: {
+      ultrasound: result({ caseId: "kussmaul-like", modality: "ultrasound", observedFindings: ["No calculus or focal mass", "Mild nonspecific duct prominence"], patternInterpretations: ["Unrevealing ultrasound despite recurrent ductal symptoms"], assessment: "Persistent clinical ductal question not resolved by ultrasound", differentials: ["Sialodochitis fibrinosa", "Mucous plugging", "Ductal stenosis"], supportingClinicalInformation: ["Thick mucous discharge", "Recurrent swelling"], missingEvidence: ["Direct ductal lumen assessment"], confidence: "Low", recommendations: [recommendation("Dedicated ductal evaluation", "Preferred", "The clinical pattern can reflect complex intraductal disease.", "Assess casts, plugs, strictures, and branching.", "Exclude acute infection before contrast injection.", ["Sialendoscopy", "Sialography", "MR sialography"]) ] }),
+      sialography_2d: result({ caseId: "kussmaul-like", modality: "sialography_2d", observedFindings: ["Multiple elongated filling defects", "Irregular segmental narrowing and mild dilatation"], patternInterpretations: ["Complex inflammatory ductal disease with possible intraductal casts"], assessment: "Ductal abnormalities compatible with fibrinous or mucous plugging", differentials: ["Sialodochitis fibrinosa / Kussmaul disease", "Chronic obstructive sialadenitis"], supportingClinicalInformation: ["Thick mucous discharge"], missingEvidence: ["Endoscopic or pathological confirmation", "Evacuation phase not supplied"], phasesAvailable: ["Precontrast", "Ductal filling"], ductMap: [{ structure: "Stensen duct and secondary branches", location: "Multifocal", finding: "Elongated filling defects and segmental narrowing" }], recommendations: [recommendation("Sialendoscopy", "Preferred", "Direct assessment can characterize and potentially remove intraductal material.", "Confirm the nature of filling defects and guide therapy.", "Imaging pattern alone does not establish Kussmaul disease.", ["MR sialography", "Laboratory evaluation for eosinophilic/allergic context as indicated"]) ] }),
     },
   },
   {
-    id: "sjogren-2d",
-    title: "Case 5 — Early Sjögren Pattern on 2D Sialography",
-    shortTitle: "Early Sjögren 2D Pattern",
-    modality: "sialography_2d",
-    message: "An informative ductal/sialectatic pattern compatible with early Sjögren-related ductal involvement.",
-    assets: [{ modality: "sialography_2d", src: "/demo-cases/sjogren-2d-sialography.jpg", alt: "Sialography showing a Sjögren-related ductal pattern" }],
-    result: {
-      caseId: "sjogren-2d", modality: "sialography_2d", isCuratedDemoCase: true, imageQuality: "Adequate",
-      findings: ["Sialectatic ductal changes", "Reduced peripheral branching"],
-      assessment: "Early Sjögren-related sialographic pattern", differentials: ["Chronic inflammatory sialadenitis"],
-      supportingFeatures: ["Peripheral punctate sialectatic pattern"], confidence: "High", concordance: null,
-      additionalImagingRecommendation: "Additional imaging may not be necessary based on the current demonstration case.",
-      demoOnly: true,
+    id: "acute-suppurative", title: "Acute suppurative sialadenitis", shortTitle: "Acute infection safety stop", summary: "Safety-critical pathway: the recommendation engine blocks routine contrast sialography and redirects to urgent assessment.", initialModality: "ultrasound", competitionRole: "safety-stop",
+    patient: patient("DEMO-007", "63", "Male", "Submandibular", "Right", "Acute", ["Pain", "Swelling", "Fever / acute infection", "Purulent discharge"], ["Diabetes / immunocompromise"], "Rapidly progressive painful swelling."),
+    assets: [us("/demo-cases/acute-ultrasound.svg", "Synthetic ultrasound schematic of acute inflammatory change", "synthetic-schematic")],
+    modalityResults: {
+      ultrasound: result({ caseId: "acute-suppurative", modality: "ultrasound", observedFindings: ["Enlarged heterogeneous gland", "Hyperemia is not assessed because no genuine Doppler data are supplied", "No definite drainable collection on this schematic"], patternInterpretations: ["Acute inflammatory glandular pattern"], assessment: "Acute sialadenitis; suppurative infection is clinically suspected", differentials: ["Acute bacterial sialadenitis", "Early abscess"], supportingClinicalInformation: ["Fever", "Purulent ductal discharge", "Acute pain and swelling"], missingEvidence: ["No genuine Doppler data", "Clinical examination and laboratory markers"], safetyNotices: ["Routine retrograde contrast sialography is inappropriate during suspected acute suppurative infection."], recommendations: [recommendation("Contrast sialography", "Currently inappropriate", "Active suppurative infection is suspected.", "Deferred until infection resolves and a residual ductal question remains.", "Do not perform routine retrograde injection during the acute episode.", ["Urgent clinical assessment", "Ultrasound for collection", "CT if deep extension is suspected"]) ] }),
     },
   },
   {
-    id: "sjogren-cbct",
-    title: "Case 6 — Sjögren on 3D / CBCT Sialography",
-    shortTitle: "Sjögren 3D Ductal Pattern",
-    modality: "cbct_3d",
-    message: "The supplied image is a curated reference; real DICOM-series import and MPR remain available in the CBCT workspace.",
-    assets: [{ modality: "cbct_3d", src: "/demo-cases/sjogren-cbct-reference.jpg", alt: "Curated reference montage of three-dimensional sialography" }],
-    result: {
-      caseId: "sjogren-cbct", modality: "cbct_3d", isCuratedDemoCase: true, imageQuality: "Adequate",
-      findings: ["Three-dimensional peripheral ductal irregularity", "Multifocal sialectatic involvement"],
-      assessment: "Sjögren-related three-dimensional ductal involvement", differentials: ["Chronic inflammatory sialadenitis"],
-      supportingFeatures: ["Diffuse three-dimensional ductal pattern"], confidence: "Moderate", concordance: null,
-      additionalImagingRecommendation: "No additional modality is required in this demonstration case.",
-      demoOnly: true,
+    id: "focal-mass", title: "Focal salivary mass with ductal displacement", shortTitle: "Focal mass", summary: "Sialography localizes mass effect; ultrasound characterizes a solid lesion but does not assign histology.", initialModality: "sialography_2d",
+    patient: patient("DEMO-008", "58", "Female", "Parotid", "Left", "Chronic", ["Palpable mass"], [], "Slowly enlarging painless preauricular mass; facial movement intact."),
+    assets: [sio("/demo-cases/ball-in-hand-sialography.jpg", "Sialography reference showing ball-in-hand ductal displacement"), us("/demo-cases/tumor-ultrasound.jpg", "Ultrasound reference showing a circumscribed solid lesion")],
+    modalityResults: {
+      sialography_2d: result({ caseId: "focal-mass", modality: "sialography_2d", observedFindings: ["Smooth displacement of opacified ducts around a space-occupying process", "No direct ductal invasion shown"], patternInterpretations: ["Ball-in-hand mass-effect pattern"], assessment: "Ductal displacement by a focal salivary lesion", differentials: ["Benign salivary neoplasm", "Salivary cyst", "Other focal lesion"], supportingClinicalInformation: ["Palpable mass"], missingEvidence: ["Tissue composition", "Vascularity", "Histology", "Evacuation phase"], phasesAvailable: ["Ductal filling"], ductMap: [{ structure: "Peripheral parotid ducts", location: "Left parotid", finding: "Smooth displacement and compression" }], recommendations: [recommendation("Ultrasound with Doppler and tissue pathway", "Preferred", "Sialography demonstrates displacement but cannot determine histology.", "Characterize solid versus cystic composition and guide sampling.", "Escalate if facial nerve symptoms or suspicious nodes appear.", ["MRI", "Image-guided tissue sampling"]) ] }),
+      ultrasound: result({ caseId: "focal-mass", modality: "ultrasound", observedFindings: ["Well-defined solid hypoechoic lesion", "No vascular conclusion because no genuine Doppler data are supplied"], patternInterpretations: ["Circumscribed solid salivary lesion"], assessment: "Solid salivary mass requiring tissue diagnosis", differentials: ["Pleomorphic adenoma", "Other benign or low-grade salivary neoplasm"], supportingClinicalInformation: ["Slow painless enlargement"], missingEvidence: ["Genuine Doppler dataset", "Deep-lobe extent", "Histopathology"], recommendations: [recommendation("Tissue diagnosis ± MRI", "Preferred", "Imaging cannot establish tumor histology.", "Establish diagnosis and map deep extent if clinically necessary.", "Prompt escalation is required if facial nerve symptoms develop.", ["Ultrasound-guided biopsy", "MRI"]) ] }),
     },
+    fusionResult: result({ caseId: "focal-mass", modality: "multimodal", observedFindings: ["Sialography shows smooth ductal displacement", "Ultrasound shows a circumscribed solid lesion"], patternInterpretations: ["Complementary localization and tissue-composition findings"], assessment: "Solid focal salivary lesion with ductal mass effect; histology is indeterminate", differentials: ["Pleomorphic adenoma", "Other salivary neoplasm"], supportingClinicalInformation: ["Slow painless enlargement"], missingEvidence: ["Histopathology", "Genuine Doppler information", "MRI if deep-lobe extent is uncertain"], complementaryFindings: ["Sialography localizes ductal displacement", "Ultrasound confirms solid composition"], conflictingFindings: [], confidence: "Moderate", concordance: "High Concordance", recommendations: [recommendation("Image-guided tissue diagnosis", "Preferred", "The modalities agree on a solid mass but cannot establish histology.", "Obtain a definitive diagnosis.", "Follow local salivary mass pathway.", ["MRI", "Specialist head and neck assessment"]) ] }),
   },
 ];
 
@@ -135,8 +103,7 @@ export function getDemoCase(caseId: string) {
 }
 
 export function getDemoResult(demoCase: DemoCase, modality: Modality) {
-  if (demoCase.result.modality === modality) return demoCase.result;
-  return demoCase.modalityResults?.[modality] ?? null;
+  return demoCase.modalityResults[modality] ?? null;
 }
 
 export function findCuratedAsset(fileName: string, modality: Modality): { demoCase: DemoCase; asset: DemoAsset } | null {

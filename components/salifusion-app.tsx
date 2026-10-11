@@ -1,342 +1,268 @@
 "use client";
 
-import { lazy, Suspense, useState } from "react";
 import Image from "next/image";
-import { curatedAssetsForModality, DEMO_CASES, findCuratedAsset } from "@/data/demo-cases";
-import { groupDicomSeries } from "@/lib/dicom/parse-dicom";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { DEMO_CASES, findCuratedAsset, getDemoResult } from "@/data/demo-cases";
+import { deriveSafetyNotices, recommendImaging } from "@/lib/clinical/recommendation-engine";
 import { getCornerstoneRuntime } from "@/lib/cornerstone/runtime";
+import { groupDicomSeries } from "@/lib/dicom/parse-dicom";
+import { createReportPdf } from "@/lib/report/pdf";
 import { serviceForCase } from "@/services/analysis";
 import { FusionService } from "@/services/fusion-service";
 import { ReportService } from "@/services/report-service";
-import type { AnalysisResult, AnalyzedStudy, Concordance, DemoAsset, DemoCase, DicomSeries, IntegratedReport, Modality, PatientInfo, ReviewDecision } from "@/types/salifusion";
 import type { FallbackImage } from "@/components/viewers/fallback-image-viewer";
+import type { AnalysisResult, AnalyzedStudy, DemoAsset, DemoCase, DicomSeries, IntegratedReport, Modality, PatientInfo, ReviewDecision, SialographyPhase } from "@/types/salifusion";
+import { patientStudyKey } from "@/types/salifusion";
 
 const StackViewer = lazy(() => import("@/components/viewers/cornerstone-stack-viewer").then((module) => ({ default: module.CornerstoneStackViewer })));
 const MprViewer = lazy(() => import("@/components/viewers/cornerstone-mpr-viewer").then((module) => ({ default: module.CornerstoneMprViewer })));
 const ImageViewer = lazy(() => import("@/components/viewers/fallback-image-viewer").then((module) => ({ default: module.FallbackImageViewer })));
 
-type Screen = "start" | "patient" | "modality" | "cases" | "review" | "results" | "report";
+type WorkspaceSection = "assessment" | Modality | "fusion";
 interface UploadState { series: DicomSeries[]; selectedUid: string; fallback: FallbackImage[]; error: string; progress: number; total: number }
-
-const symptoms = ["Pain", "Swelling", "Meal-related symptoms", "Recurrent swelling", "Xerostomia", "Fever", "Palpable mass"];
-const modalityInfo: { id: Modality; title: string; detail: string; formats: string }[] = [
-  { id: "ultrasound", title: "Ultrasound", detail: "Single-frame medical image review", formats: "DICOM · JPG · PNG" },
-  { id: "sialography_2d", title: "2D Sialography", detail: "Single or sequential examination images", formats: "DICOM · JPG · PNG" },
-  { id: "cbct_3d", title: "3D / CBCT Sialography", detail: "Spatial series with true orthographic MPR", formats: "DICOM series / folder" },
-  { id: "mr_sialography", title: "MR Sialography", detail: "MR ductal image review pathway", formats: "DICOM · JPG · PNG" },
-];
-const initialPatient: PatientInfo = { patientName: "", patientId: "", age: "", sex: "", gland: "", side: "", symptoms: [], clinicalNotes: "" };
 const emptyUpload = (): UploadState => ({ series: [], selectedUid: "", fallback: [], error: "", progress: 0, total: 0 });
-
-function modalityTitle(modality: Modality) {
-  return modalityInfo.find((item) => item.id === modality)?.title ?? modality;
-}
-
-function selectedSeries(upload: UploadState) {
-  return upload.series.find((series) => series.uid === upload.selectedUid) ?? upload.series[0] ?? null;
-}
-
-function hasUpload(upload: UploadState) {
-  return upload.series.length > 0 || upload.fallback.length > 0;
-}
+const emptyUploads = (): Record<Modality, UploadState> => ({ ultrasound: emptyUpload(), sialography_2d: emptyUpload(), cbct_3d: emptyUpload() });
+const modalityNames: Record<Modality, string> = { ultrasound: "Ultrasound", sialography_2d: "2D Sialography", cbct_3d: "3D CBCT Sialography" };
+const sections: { id: WorkspaceSection; label: string; short: string }[] = [
+  { id: "assessment", label: "Patient Assessment", short: "Hx" }, { id: "ultrasound", label: "Ultrasound", short: "US" }, { id: "sialography_2d", label: "2D Sialography", short: "2D" }, { id: "cbct_3d", label: "3D CBCT Sialography", short: "3D" }, { id: "fusion", label: "Multimodal Fusion", short: "FX" },
+];
+const symptomOptions = ["Recurrent swelling", "Meal-related swelling or pain", "Xerostomia", "Xerophthalmia", "Thick mucous discharge", "Purulent discharge", "Fever / acute infection", "Palpable mass", "Facial nerve symptoms", "Pain", "Swelling"];
+const historyOptions = ["Previous salivary stone", "Previous ductal procedure", "Recurrent childhood parotitis", "Autoimmune disorder / serology", "Head and neck radiotherapy", "Radioiodine treatment", "Thyroid disease / treatment", "Diabetes / immunocompromise", "Other relevant risk factor"];
+const allPhases: SialographyPhase[] = ["Precontrast", "Ductal filling", "Acinar / parenchymal filling", "Evacuation"];
+const competitionSteps = ["Patient presentation", "Review initial ultrasound", "Recognize unresolved obstruction", "Open independent ductal pathway", "Analyze ductal phases", "Automatic cross-modal fusion", "Generate structured report"];
 
 export function SaliFusionApp() {
-  const [screen, setScreen] = useState<Screen>("start");
-  const [patient, setPatient] = useState<PatientInfo>(initialPatient);
-  const [modality, setModality] = useState<Modality | null>(null);
-  const [demoCase, setDemoCase] = useState<DemoCase | null>(null);
-  const [demoAsset, setDemoAsset] = useState<DemoAsset | null>(null);
-  const [upload, setUpload] = useState<UploadState>(emptyUpload);
-  const [analyzedStudies, setAnalyzedStudies] = useState<AnalyzedStudy[]>([]);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [screen, setScreen] = useState<"welcome" | "workspace" | "report">("welcome");
+  const [active, setActive] = useState<WorkspaceSection>("assessment");
+  const [demoCase, setDemoCase] = useState<DemoCase>(DEMO_CASES[2]);
+  const [patient, setPatient] = useState<PatientInfo>(DEMO_CASES[2].patient);
+  const [studies, setStudies] = useState<AnalyzedStudy[]>([]);
+  const [fusion, setFusion] = useState<AnalysisResult | null>(null);
+  const [uploads, setUploads] = useState<Record<Modality, UploadState>>(emptyUploads);
+  const [analyzing, setAnalyzing] = useState<Modality | null>(null);
   const [report, setReport] = useState<IntegratedReport | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
   const [clinicianNote, setClinicianNote] = useState("");
+  const [competitionMode, setCompetitionMode] = useState(false);
+  const [competitionStep, setCompetitionStep] = useState(0);
+  const [selectedPhase, setSelectedPhase] = useState<SialographyPhase>("Ductal filling");
 
-  const workflowScreen = screen === "cases" ? "start" : screen;
-  const step = ({ start: 0, patient: 1, modality: 2, review: 3, results: 4, report: 5 } as Record<string, number>)[workflowScreen] ?? 0;
-  const series = selectedSeries(upload);
-  const usedModalities = analyzedStudies.map((study) => study.modality);
+  const activeModality = active === "ultrasound" || active === "sialography_2d" || active === "cbct_3d" ? active : null;
+  const activeStudy = activeModality ? studies.find((study) => study.modality === activeModality) : null;
+  const activeResult = active === "fusion" ? fusion : activeStudy?.result ?? null;
+  const safetyNotices = deriveSafetyNotices(patient);
+  const activeAsset = activeModality ? demoCase.assets.find((asset) => asset.modality === activeModality) ?? null : null;
 
-  function revoke(state: UploadState) {
-    state.fallback.forEach((item) => { if (item.objectUrl) URL.revokeObjectURL(item.src); });
+  function revokeUploads(states: Record<Modality, UploadState>) {
+    Object.values(states).flatMap((state) => state.fallback).forEach((item) => { if (item.objectUrl) URL.revokeObjectURL(item.src); });
   }
 
-  function resetCurrentImport() {
-    revoke(upload);
-    setUpload(emptyUpload());
-    setDemoCase(null);
-    setDemoAsset(null);
-  }
-
-  function clearStudy() {
-    revoke(upload);
-    setUpload(emptyUpload());
-    setAnalysisResult(null);
-    setAnalyzedStudies([]);
+  function chooseCase(next: DemoCase, competition = false) {
+    revokeUploads(uploads);
+    setDemoCase(next);
+    setPatient(next.patient);
+    setStudies([]);
+    setFusion(null);
     setReport(null);
-    setDemoCase(null);
-    setDemoAsset(null);
-    setModality(null);
-    setPatient(initialPatient);
-    setClinicianNote("");
+    setUploads(emptyUploads());
+    setActive(competition ? "assessment" : next.initialModality);
+    setSelectedPhase("Ductal filling");
+    setCompetitionMode(competition);
+    setCompetitionStep(0);
+    setScreen("workspace");
+  }
+
+  function resetAll() {
+    revokeUploads(uploads);
+    setUploads(emptyUploads());
+    setStudies([]);
+    setFusion(null);
+    setReport(null);
+    setCompetitionMode(false);
+    setScreen("welcome");
     void getCornerstoneRuntime().then(({ core, dicom }) => { dicom.wadouri.fileManager.purge(); core.cache.purgeCache(); }).catch(() => undefined);
   }
 
-  function startNew() { clearStudy(); setScreen("patient"); }
-  function home() { clearStudy(); setScreen("start"); }
-  function openCases() { clearStudy(); setScreen("cases"); }
-
-  function chooseDemo(item: DemoCase) {
-    const asset = item.assets.find((candidate) => candidate.modality === item.modality) ?? item.assets[0];
-    setDemoCase(item);
-    setDemoAsset(asset);
-    setModality(asset.modality);
-    setPatient({
-      patientName: "Curated Demo Patient",
-      patientId: `DEMO-${item.id.slice(0, 8).toUpperCase()}`,
-      age: "47",
-      sex: "Female",
-      gland: "Parotid",
-      side: "Left",
-      symptoms: item.id.includes("sialolith") ? ["Pain", "Meal-related symptoms"] : ["Swelling"],
-      clinicalNotes: "Curated competition demonstration case.",
-    });
-    setScreen("review");
-  }
-
-  function loadCuratedAsset(item: DemoCase, asset: DemoAsset) {
-    revoke(upload);
-    setUpload(emptyUpload());
-    setDemoCase(item);
-    setDemoAsset(asset);
-    setModality(asset.modality);
-  }
-
-  async function importFiles(list: FileList | null) {
-    if (!list?.length || !modality) return;
+  async function importFiles(modality: Modality, list: FileList | null) {
+    if (!list?.length) return;
     const files = Array.from(list).filter((file) => file.size > 0);
-    revoke(upload);
-    setDemoCase(null);
-    setDemoAsset(null);
-    setUpload({ ...emptyUpload(), total: files.length });
+    const current = uploads[modality];
+    current.fallback.forEach((item) => { if (item.objectUrl) URL.revokeObjectURL(item.src); });
+    setUploads((value) => ({ ...value, [modality]: { ...emptyUpload(), total: files.length } }));
     const imageFiles = files.filter((file) => file.type === "image/jpeg" || file.type === "image/png" || /\.(jpe?g|png)$/i.test(file.name));
     if (imageFiles.length === files.length) {
       const recognized = files.length === 1 ? findCuratedAsset(files[0].name, modality) : null;
-      if (recognized) {
-        setDemoCase(recognized.demoCase);
-        setDemoAsset(recognized.asset);
-      }
-      setUpload({ ...emptyUpload(), fallback: imageFiles.map((file) => ({ src: URL.createObjectURL(file), alt: file.name, name: file.name, objectUrl: true })) });
+      if (recognized) chooseCase(recognized.demoCase);
+      setUploads((value) => ({ ...value, [modality]: { ...emptyUpload(), fallback: imageFiles.map((file) => ({ src: URL.createObjectURL(file), alt: file.name, name: file.name, objectUrl: true })) } }));
       return;
     }
     try {
-      const grouped = await groupDicomSeries(files, (progress, total) => setUpload((value) => ({ ...value, progress, total })));
-      if (modality === "cbct_3d" && grouped.every((item) => item.instances.length < 2)) throw new Error("No multi-slice DICOM series was found in the selected folder.");
-      setUpload({ ...emptyUpload(), series: grouped, selectedUid: grouped[0].uid, progress: files.length, total: files.length });
+      const grouped = await groupDicomSeries(files, (progress, total) => setUploads((value) => ({ ...value, [modality]: { ...value[modality], progress, total } })));
+      if (modality === "cbct_3d" && grouped.every((item) => item.instances.length < 2)) throw new Error("No multi-slice DICOM series was found.");
+      setUploads((value) => ({ ...value, [modality]: { ...emptyUpload(), series: grouped, selectedUid: grouped[0].uid, progress: files.length, total: files.length } }));
     } catch (reason) {
-      setUpload({ ...emptyUpload(), error: reason instanceof Error ? reason.message : "The selected files could not be read." });
+      setUploads((value) => ({ ...value, [modality]: { ...emptyUpload(), error: reason instanceof Error ? reason.message : "The selected files could not be read." } }));
     }
   }
 
-  async function runAnalysis() {
-    if (!demoCase || !demoAsset || !modality) return;
-    setAnalyzing(true);
+  async function analyze(modality: Modality) {
+    const asset = demoCase.assets.find((item) => item.modality === modality);
+    const predefined = getDemoResult(demoCase, modality);
+    if (!asset || !predefined) return;
+    setAnalyzing(modality);
     try {
       const result = await serviceForCase(demoCase, modality).analyze(demoCase, modality);
-      const study: AnalyzedStudy = { caseId: demoCase.id, modality, asset: demoAsset, result };
-      const nextStudies = [...analyzedStudies.filter((item) => item.modality !== modality), study];
-      setAnalyzedStudies(nextStudies);
-      setAnalysisResult(new FusionService().combine(nextStudies));
-      setReport(null);
-      setScreen("results");
-    } finally {
-      setAnalyzing(false);
-    }
+      const study: AnalyzedStudy = { caseId: demoCase.id, modality, asset, result, patientKey: patientStudyKey(patient) };
+      const next = [...studies.filter((item) => item.modality !== modality), study];
+      setStudies(next);
+      if (next.length > 1) {
+        try { setFusion(new FusionService().combine(next)); } catch { setFusion(null); }
+      }
+    } finally { setAnalyzing(null); }
   }
 
-  function updateConcordance(value: Concordance) {
-    if (analyzedStudies.length < 2) return;
-    const base = new FusionService().combine(analyzedStudies);
-    setAnalysisResult(new FusionService().withConcordance(base, value));
-  }
-
-  function addAnotherModality() {
-    resetCurrentImport();
-    setModality(null);
-    setScreen("modality");
-  }
-
-  function generateReport() {
-    if (!analysisResult) return;
-    setReport(new ReportService().create(patient, analyzedStudies, analysisResult));
+  function openReport() {
+    const result = fusion ?? activeResult ?? studies.at(-1)?.result;
+    if (!result || !studies.length) return;
+    setReport(new ReportService().create(patient, studies, result));
     setClinicianNote("");
     setScreen("report");
   }
 
   function reviewReport(decision: ReviewDecision) {
-    if (!report) return;
-    setReport(new ReportService().review(report, decision, clinicianNote));
+    if (report) setReport(new ReportService().review(report, decision, clinicianNote));
   }
 
-  return (
-    <div className="app-root">
-      {screen !== "start" && <AppHeader onHome={home} step={step} />}
-      {screen === "start" && <StartScreen onStart={startNew} onDemo={openCases} />}
-      {screen === "patient" && <PatientScreen patient={patient} setPatient={setPatient} onBack={home} onNext={() => setScreen("modality")} />}
-      {screen === "modality" && (
-        <ModalityScreen
-          selected={modality}
-          usedModalities={usedModalities}
-          adding={analyzedStudies.length > 0}
-          onSelect={setModality}
-          onBack={() => setScreen(analyzedStudies.length ? "results" : "patient")}
-          onNext={() => modality && setScreen("review")}
-        />
-      )}
-      {screen === "cases" && <CasesScreen onSelect={chooseDemo} onBack={home} />}
-      {screen === "review" && modality && (
-        <ReviewScreen
-          modality={modality}
-          demoCase={demoCase}
-          demoAsset={demoAsset}
-          upload={upload}
-          series={series}
-          analyzedCount={analyzedStudies.length}
-          onLoadCurated={loadCuratedAsset}
-          onImport={importFiles}
-          setUpload={setUpload}
-          onBack={() => setScreen("modality")}
-          onAnalyze={runAnalysis}
-          analyzing={analyzing}
-          onOpenRealCbct={resetCurrentImport}
-        />
-      )}
-      {screen === "results" && analysisResult && (
-        <ResultsScreen
-          result={analysisResult}
-          studies={analyzedStudies}
-          onBack={() => setScreen("review")}
-          onAdd={addAnotherModality}
-          onReport={generateReport}
-          onConcordance={updateConcordance}
-        />
-      )}
-      {screen === "report" && report && (
-        <ReportScreen
-          report={report}
-          clinicianNote={clinicianNote}
-          setClinicianNote={setClinicianNote}
-          onReview={reviewReport}
-          onBack={() => setScreen("results")}
-          onNew={startNew}
-        />
-      )}
+  function downloadPdf() {
+    if (!report) return;
+    const bytes = createReportPdf({ ...report, clinicianNote });
+    const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer], { type: "application/pdf" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `SaliFusion-${report.patient.patientId || "report"}.pdf`;
+    link.click();
+    globalThis.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function advanceCompetition() {
+    const next = Math.min(competitionStep + 1, competitionSteps.length - 1);
+    if (next === 1) setActive("ultrasound");
+    if (next === 2) await analyze("ultrasound");
+    if (next === 3) setActive("sialography_2d");
+    if (next === 4) await analyze("sialography_2d");
+    if (next === 5) setActive("fusion");
+    if (next === 6) openReport();
+    setCompetitionStep(next);
+  }
+
+  if (screen === "welcome") return <WelcomeScreen onOpen={() => chooseCase(DEMO_CASES[0])} onCompetition={() => chooseCase(DEMO_CASES[2], true)} onSafety={() => chooseCase(DEMO_CASES[6])} />;
+  if (screen === "report" && report) return <ReportScreen report={report} clinicianNote={clinicianNote} setClinicianNote={setClinicianNote} onReview={reviewReport} onBack={() => setScreen("workspace")} onDownload={downloadPdf} onHome={resetAll} />;
+
+  return <div className="workstation">
+    <WorkstationHeader active={active} setActive={setActive} fusionReady={Boolean(fusion)} onHome={resetAll} onReport={openReport} reportReady={studies.length > 0} />
+    {competitionMode && <CompetitionGuide step={competitionStep} busy={Boolean(analyzing)} onNext={() => void advanceCompetition()} onExit={() => setCompetitionMode(false)} />}
+    <div className="workstation-grid">
+      <PatientRail patient={patient} setPatient={setPatient} demoCase={demoCase} onCase={(id) => chooseCase(DEMO_CASES.find((item) => item.id === id) ?? demoCase)} safetyNotices={safetyNotices} />
+      <main className="imaging-stage">
+        <StageHeader active={active} demoCase={demoCase} activeAsset={activeAsset} />
+        {active === "assessment" && <AssessmentWorkspace patient={patient} safetyNotices={safetyNotices} onOpen={setActive} />}
+        {activeModality && <ModalityWorkspace modality={activeModality} asset={activeAsset} demoCase={demoCase} upload={uploads[activeModality]} setUpload={(next) => setUploads((value) => ({ ...value, [activeModality]: next }))} onImport={(files) => void importFiles(activeModality, files)} result={activeStudy?.result ?? null} analyzing={analyzing === activeModality} onAnalyze={() => void analyze(activeModality)} selectedPhase={selectedPhase} setSelectedPhase={setSelectedPhase} />}
+        {active === "fusion" && <FusionWorkspace studies={studies} result={fusion} onOpen={setActive} />}
+      </main>
+      <DiagnosticRail patient={patient} result={activeResult} safetyNotices={safetyNotices} />
     </div>
-  );
+    <StudyTimeline studies={studies} active={active} setActive={setActive} result={activeResult} onReport={openReport} />
+  </div>;
 }
 
-function AppHeader({ onHome, step }: { onHome: () => void; step: number }) {
-  const names = ["Patient", "Modality", "Import & Review", "Results", "Report"];
-  return <header className="app-header"><button className="brand-button" type="button" onClick={onHome}><span className="brand-mark">SF</span><span>SaliFusion AI<small>Research demonstration</small></span></button><ol className="stepper">{names.map((name, index) => <li key={name} className={step >= index + 1 ? "complete" : ""}><span>{index + 1}</span>{name}</li>)}</ol><span className="local-badge">Local imaging</span></header>;
+function WelcomeScreen({ onOpen, onCompetition, onSafety }: { onOpen: () => void; onCompetition: () => void; onSafety: () => void }) {
+  return <main className="welcome"><header><Brand /><span className="system-pill"><i /> Local workstation · Research demo</span></header><section className="welcome-hero"><div><p className="eyebrow">Equipment-integrated multimodal decision support</p><h1>See the duct.<br /><span>Understand the whole gland.</span></h1><p className="lede">A clinically coherent workstation for independent ultrasound, 2D sialography, genuine CBCT DICOM review, adaptive recommendations, and automatic cross-modal interpretation.</p><div className="welcome-actions"><button className="primary-action" onClick={onCompetition}>Run competition demo <span>→</span></button><button className="secondary-action" onClick={onOpen}>Open workstation</button><button className="ghost-action" onClick={onSafety}>Open safety-stop case</button></div><p className="demo-disclaimer">Deterministic educational demonstration. No clinical validation or autonomous diagnosis is claimed.</p></div><aside className="hero-console"><div className="console-top"><span>DEMO / OCCULT OBSTRUCTION</span><span className="live-dot">GUIDED</span></div><div className="mini-patient"><b>38F · Left parotid</b><span>Recurrent meal-related swelling</span></div><div className="console-flow"><article><em>01</em><div><b>Ultrasound</b><span>No visible calculus</span></div><i className="neutral" /></article><article><em>02</em><div><b>Decision support</b><span>Unresolved ductal question</span></div><i className="warn" /></article><article><em>03</em><div><b>Sialography</b><span>Proximal stenosis mapped</span></div><i className="positive" /></article></div><div className="console-result"><span>AUTOMATIC FUSION</span><strong>Complementary findings resolve the obstruction.</strong></div></aside></section><footer><span>01 Clinical assessment</span><span>02 Independent pathways</span><span>03 Explainable reasoning</span><span>04 Structured report</span></footer></main>;
 }
 
-function StartScreen({ onStart, onDemo }: { onStart: () => void; onDemo: () => void }) {
-  return <main className="start-screen"><header className="start-header"><div className="brand"><span className="brand-mark">SF</span>SaliFusion AI</div><span className="privacy-note">Local-first medical image review</span></header><section className="hero"><div><p className="eyebrow">Functional medical imaging proof of concept</p><h1>SaliFusion AI</h1><p className="subtitle">Multimodal AI-Assisted Assessment of Salivary Gland Diseases</p><div className="actions"><button className="button button-primary" type="button" onClick={onStart}>Start New Analysis</button><button className="button button-secondary" type="button" onClick={onDemo}>Open Demo Case</button></div><p className="integrity-note">Image import and visualization are functional. Diagnostic AI output is simulated only for curated cases.</p></div><aside className="workflow-card" aria-label="Analysis workflow"><p className="card-kicker">Competition workflow · under 60 seconds</p><h2>A focused clinical review</h2><ol className="workflow-list">{["Patient information", "Select first modality", "Import medical images", "Run curated analysis", "Optionally add a modality", "Generate the report"].map((item, index) => <li key={item}><span>{index + 1}</span>{item}</li>)}</ol></aside></section><footer className="start-footer">Research demonstration only · Not for clinical diagnosis</footer></main>;
+function Brand() { return <div className="brand"><span className="brand-symbol"><i /><i /><i /></span><span><b>SaliFusion</b><small>Clinical imaging intelligence</small></span></div>; }
+
+function WorkstationHeader({ active, setActive, fusionReady, onHome, onReport, reportReady }: { active: WorkspaceSection; setActive: (section: WorkspaceSection) => void; fusionReady: boolean; onHome: () => void; onReport: () => void; reportReady: boolean }) {
+  return <header className="workstation-header"><button className="brand-reset" onClick={onHome}><Brand /></button><nav aria-label="Clinical workspaces">{sections.map((section) => <button key={section.id} className={active === section.id ? "active" : ""} onClick={() => setActive(section.id)} disabled={section.id === "fusion" && !fusionReady}><span>{section.short}</span>{section.label}{section.id === "fusion" && fusionReady && <i />}</button>)}</nav><div className="header-tools"><span className="connection-state"><i /> DICOM local</span><button className="report-button" disabled={!reportReady} onClick={onReport}>Structured report</button></div></header>;
 }
 
-function PatientScreen({ patient, setPatient, onBack, onNext }: { patient: PatientInfo; setPatient: (value: PatientInfo) => void; onBack: () => void; onNext: () => void }) {
-  const valid = (patient.patientName.trim() || patient.patientId.trim()) && patient.age && patient.sex && patient.gland && patient.side;
-  const update = (key: keyof PatientInfo, value: string) => setPatient({ ...patient, [key]: value });
-  return <PageShell eyebrow="Step 1" title="Patient information" intro="Use only de-identified or fictional data in this demonstration."><div className="form-card"><div className="form-grid"><label>Patient Name<input value={patient.patientName} onChange={(e) => update("patientName", e.target.value)} placeholder="Name or initials" autoComplete="off" /></label><label>Patient ID<input value={patient.patientId} onChange={(e) => update("patientId", e.target.value)} placeholder="e.g. DEMO-001" autoComplete="off" /></label><label>Age<input value={patient.age} onChange={(e) => update("age", e.target.value.replace(/\D/g, "").slice(0, 3))} inputMode="numeric" placeholder="Age" /></label><label>Sex<select value={patient.sex} onChange={(e) => update("sex", e.target.value)}><option value="">Select</option><option>Female</option><option>Male</option><option>Other</option><option>Not specified</option></select></label><label>Gland<select value={patient.gland} onChange={(e) => update("gland", e.target.value)}><option value="">Select</option><option>Parotid</option><option>Submandibular</option></select></label><label>Side<select value={patient.side} onChange={(e) => update("side", e.target.value)}><option value="">Select</option><option>Right</option><option>Left</option><option>Bilateral</option></select></label></div><fieldset><legend>Symptoms</legend><div className="chip-grid">{symptoms.map((symptom) => <label className="check-chip" key={symptom}><input type="checkbox" checked={patient.symptoms.includes(symptom)} onChange={(e) => setPatient({ ...patient, symptoms: e.target.checked ? [...patient.symptoms, symptom] : patient.symptoms.filter((item) => item !== symptom) })} /><span>{symptom}</span></label>)}</div></fieldset><label className="notes-field">Clinical History / Notes<textarea value={patient.clinicalNotes} onChange={(e) => update("clinicalNotes", e.target.value)} placeholder="Short relevant clinical history or examination note" /></label><p className="field-help">Enter at least a patient name or patient ID. Age, sex, gland, and side are also required.</p></div><Navigation onBack={onBack} onNext={onNext} nextDisabled={!valid} nextLabel="Continue to modality" /></PageShell>;
+function CompetitionGuide({ step, busy, onNext, onExit }: { step: number; busy: boolean; onNext: () => void; onExit: () => void }) {
+  return <section className="competition-guide"><span className="competition-label">Competition Demo</span><div className="competition-track">{competitionSteps.map((item, index) => <span key={item} className={index === step ? "current" : index < step ? "done" : ""}><i>{index + 1}</i>{item}</span>)}</div><button onClick={onNext} disabled={busy || step === competitionSteps.length - 1}>{busy ? "Analyzing…" : step === competitionSteps.length - 2 ? "Build report" : "Next step"}</button><button className="guide-close" onClick={onExit} aria-label="Exit competition mode">×</button></section>;
 }
 
-function ModalityScreen({ selected, usedModalities, adding, onSelect, onBack, onNext }: { selected: Modality | null; usedModalities: Modality[]; adding: boolean; onSelect: (value: Modality) => void; onBack: () => void; onNext: () => void }) {
-  return <PageShell eyebrow="Step 2" title={adding ? "Add another modality" : "Select imaging pathway"} intro={adding ? "The next analyzed modality will be fused automatically with this patient’s existing study." : "Choose the first modality available for this examination."}><div className="modality-grid">{modalityInfo.map((item, index) => { const used = usedModalities.includes(item.id); return <button key={item.id} type="button" disabled={used} className={`modality-card ${selected === item.id ? "selected" : ""}`} onClick={() => onSelect(item.id)}><span className="modality-number">0{index + 1}</span><strong>{item.title}</strong><span>{item.detail}</span><small>{used ? "Already analyzed for this patient" : item.formats}</small></button>; })}</div><Navigation onBack={onBack} onNext={onNext} nextDisabled={!selected} nextLabel="Continue to image import" /></PageShell>;
+function PatientRail({ patient, setPatient, demoCase, onCase, safetyNotices }: { patient: PatientInfo; setPatient: (patient: PatientInfo) => void; demoCase: DemoCase; onCase: (id: string) => void; safetyNotices: string[] }) {
+  const toggle = (key: "symptoms" | "history", item: string) => setPatient({ ...patient, [key]: patient[key].includes(item) ? patient[key].filter((value) => value !== item) : [...patient[key], item] });
+  const update = <K extends keyof PatientInfo>(key: K, value: PatientInfo[K]) => setPatient({ ...patient, [key]: value });
+  return <aside className="patient-rail"><div className="rail-heading"><span>Case navigator</span><b>Clinical context</b></div><label className="case-select">Educational case<select value={demoCase.id} onChange={(event) => onCase(event.target.value)}>{DEMO_CASES.map((item, index) => <option key={item.id} value={item.id}>{String(index + 1).padStart(2, "0")} · {item.shortTitle}</option>)}</select></label><div className="patient-identity"><div className="avatar">{patient.sex === "Male" ? "M" : "F"}</div><div><input aria-label="Patient ID" value={patient.patientId} onChange={(event) => update("patientId", event.target.value)} /><span>{patient.age || "–"} years · {patient.sex || "unspecified"}</span></div></div><div className="anatomy-tags"><button className="active">{patient.side || "Side"}</button><button className="active">{patient.gland || "Gland"}</button><select aria-label="Symptom course" value={patient.symptomCourse} onChange={(event) => update("symptomCourse", event.target.value as PatientInfo["symptomCourse"])}><option value="">Course</option><option>Acute</option><option>Chronic</option><option>Recurrent</option></select></div><details open><summary>Presenting features <span>{patient.symptoms.length}</span></summary><div className="clinical-checks">{symptomOptions.map((item) => <label key={item}><input type="checkbox" checked={patient.symptoms.includes(item)} onChange={() => toggle("symptoms", item)} /><span>{item}</span></label>)}</div></details><details><summary>Relevant history <span>{patient.history.length}</span></summary><div className="clinical-checks">{historyOptions.map((item) => <label key={item}><input type="checkbox" checked={patient.history.includes(item)} onChange={() => toggle("history", item)} /><span>{item}</span></label>)}</div></details><details open={patient.symptoms.includes("Xerostomia")}><summary>Medication & serology</summary><label className="compact-field">Xerogenic / relevant medication<textarea value={patient.medications} onChange={(event) => update("medications", event.target.value)} /></label><label className="compact-field">Autoimmune serology<textarea value={patient.serology} onChange={(event) => update("serology", event.target.value)} /></label></details><details open={safetyNotices.length > 0}><summary>Contrast safety {safetyNotices.length > 0 && <i className="alert-dot" />}</summary><label className="compact-field">Reaction history<select value={patient.contrastReaction} onChange={(event) => update("contrastReaction", event.target.value as PatientInfo["contrastReaction"])}><option value="">Select</option><option>None known</option><option>Previous mild reaction</option><option>Previous severe reaction</option><option>Unknown</option></select></label></details><label className="compact-field notes">Clinical note<textarea value={patient.clinicalNotes} onChange={(event) => update("clinicalNotes", event.target.value)} /></label><div className="privacy-lock"><span>⌁</span><div><b>Local data boundary</b><small>Patient files remain in this browser session.</small></div></div></aside>;
 }
 
-function CasesScreen({ onSelect, onBack }: { onSelect: (item: DemoCase) => void; onBack: () => void }) {
-  return <PageShell eyebrow="Curated demonstration" title="Open a competition case" intro="This shortcut imports the first predefined image for one of six clinical cases. Complementary imaging can be added after analysis."><div className="case-grid">{DEMO_CASES.map((item) => <button type="button" className="case-card" key={item.id} onClick={() => onSelect(item)}><div className="case-thumb"><Image src={item.assets[0].src} alt="" width={440} height={280} /></div><span className="case-mode">{modalityTitle(item.modality)}</span><strong>{item.shortTitle}</strong><p>{item.message}</p><span className="case-action">Import demo image →</span></button>)}</div><Navigation onBack={onBack} /></PageShell>;
+function StageHeader({ active, demoCase, activeAsset }: { active: WorkspaceSection; demoCase: DemoCase; activeAsset: DemoAsset | null }) {
+  const title = sections.find((item) => item.id === active)?.label ?? active;
+  return <header className="stage-header"><div><p>{title.toUpperCase()} / {demoCase.patient.side.toUpperCase()} {demoCase.patient.gland.toUpperCase()}</p><h1>{active === "assessment" ? demoCase.title : title}</h1><span>{active === "assessment" ? demoCase.summary : activeAsset?.sourceLabel ?? "Import local imaging for review"}</span></div><div className="stage-status"><span><i className="green" /> De-identified demo</span><span><i /> Measurements illustrative unless DICOM-calibrated</span></div></header>;
 }
 
-interface ReviewProps {
-  modality: Modality;
-  demoCase: DemoCase | null;
-  demoAsset: DemoAsset | null;
-  upload: UploadState;
-  series: DicomSeries | null;
-  analyzedCount: number;
-  onLoadCurated: (demoCase: DemoCase, asset: DemoAsset) => void;
-  onImport: (list: FileList | null) => void;
-  setUpload: React.Dispatch<React.SetStateAction<UploadState>>;
-  onBack: () => void;
-  onAnalyze: () => void;
-  analyzing: boolean;
-  onOpenRealCbct: () => void;
+function AssessmentWorkspace({ patient, safetyNotices, onOpen }: { patient: PatientInfo; safetyNotices: string[]; onOpen: (section: WorkspaceSection) => void }) {
+  const recommendations = recommendImaging(patient);
+  return <div className="assessment-workspace"><section className="assessment-hero"><div><span className="kicker">Clinical synthesis</span><h2>{patient.symptomCourse || "Unspecified-course"} {patient.gland.toLowerCase()} presentation</h2><p>{patient.clinicalNotes || "Complete the structured history in the left panel."}</p></div><div className="assessment-stat"><span>Selected findings</span><strong>{patient.symptoms.length}</strong><small>{patient.history.length} relevant history item{patient.history.length === 1 ? "" : "s"}</small></div></section>{safetyNotices.map((notice) => <SafetyBanner key={notice} text={notice} />)}<div className="assessment-grid"><section><header><span>Clinical signal</span><b>Presentation features</b></header><ul className="signal-list">{patient.symptoms.map((item) => <li key={item}><i />{item}</li>)}</ul></section><section><header><span>Decision support</span><b>Recommended pathway</b></header>{recommendations.map((item) => <RecommendationCard key={item.modality} item={item} />)}</section></div><section className="pathway-chooser"><header><div><span>Independent imaging pathways</span><b>Start with the clinically indicated modality</b></div><small>No modality is forced to follow another.</small></header><div>{(["ultrasound", "sialography_2d", "cbct_3d"] as Modality[]).map((modality) => <button key={modality} onClick={() => onOpen(modality)}><i>{modality === "ultrasound" ? "US" : modality === "sialography_2d" ? "2D" : "3D"}</i><span><b>{modalityNames[modality]}</b><small>{modality === "ultrasound" ? "Gland, focal lesion, calculus" : modality === "sialography_2d" ? "Duct lumen, branches, phases" : "Spatial duct map and true MPR"}</small></span><em>→</em></button>)}</div></section><IntegrationPanel /></div>;
 }
 
-function ReviewScreen(props: ReviewProps) {
-  const { modality, demoCase, demoAsset, upload, series, analyzedCount, onLoadCurated, onImport, setUpload, onBack, onAnalyze, analyzing, onOpenRealCbct } = props;
-  const available = curatedAssetsForModality(modality);
-  const imageReady = Boolean(demoCase && demoAsset) || hasUpload(upload);
-  return <main className="workspace-page"><div className="workspace-heading"><div><p className="eyebrow">Step 3 · Import & review</p><h2>{demoCase ? demoCase.title : modalityTitle(modality)}</h2><p>{demoCase?.message ?? "Files remain in this browser session and are not uploaded to an AI service."}</p>{analyzedCount > 0 && <span className="auto-fusion-badge">Adding modality {analyzedCount + 1} · fusion will start automatically after analysis</span>}</div><button className="text-button" type="button" onClick={onBack}>← Back</button></div>
-    <CuratedImportPanel modality={modality} available={available} selected={demoAsset} onSelect={onLoadCurated} />
-    {demoCase && demoAsset ? <CuratedViewer asset={demoAsset} /> : <UploadWorkspace title={modalityTitle(modality)} modality={modality} state={upload} series={series} onImport={onImport} setState={setUpload} />}
-    {demoAsset?.modality === "cbct_3d" && <div className="cbct-separation-note"><div><strong>Curated reference is separate from the functional MPR viewer</strong><p>Open the real CBCT workspace to select a DICOM folder, build a volume, and review axial/coronal/sagittal MPR.</p></div><button type="button" className="button button-secondary" onClick={onOpenRealCbct}>Open real CBCT import</button></div>}
-    <div className="analysis-bar"><div>{demoCase && demoAsset ? <><strong>Curated image recognized</strong><span>Predefined case-specific analysis is available.</span></> : imageReady ? <><strong>Image loaded successfully.</strong><span>AI inference is currently available only for curated demonstration cases.</span></> : modality === "mr_sialography" ? <><strong>No predefined MR demo case is packaged</strong><span>Images can be reviewed, but simulated analysis will remain unavailable.</span></> : <><strong>Import images to begin review</strong><span>DICOM is processed locally in your browser.</span></>}</div><button type="button" className="button button-primary" disabled={!demoCase || !demoAsset || analyzing} onClick={onAnalyze}>{analyzing ? "Analyzing demonstration…" : "Run AI Analysis"}</button></div>
-  </main>;
+function IntegrationPanel() { return <section className="integration-panel"><header><div><span>Integration architecture</span><b>Connected workstation, not proprietary hardware</b></div><span className="implemented-key">● implemented</span></header><div><article><i className="implemented" /><b>Local DICOM import</b><span>Implemented</span></article><article><i className="implemented" /><b>Cornerstone MPR</b><span>Implemented</span></article><article><i className="simulated" /><b>Ultrasound device</b><span>Simulated replay</span></article><article><i className="planned" /><b>DICOMweb / PACS</b><span>Adapter point</span></article><article><i className="planned" /><b>Vendor SDK</b><span>Future integration</span></article></div></section>;
 }
 
-function CuratedImportPanel({ modality, available, selected, onSelect }: { modality: Modality; available: { demoCase: DemoCase; asset: DemoAsset }[]; selected: DemoAsset | null; onSelect: (demoCase: DemoCase, asset: DemoAsset) => void }) {
-  if (!available.length) return <section className="curated-import-panel"><div><span className="section-label">Packaged demonstration images</span><strong>No predefined demo case is currently packaged for MR Sialography.</strong><p>You may still import DICOM, JPG, or PNG images for local viewing. Diagnostic output will not be fabricated.</p></div></section>;
-  return <section className="curated-import-panel"><div><span className="section-label">Import a packaged {modalityTitle(modality)} image</span><p>Selecting one of these assets follows the same deterministic recognition path as importing its exact filename.</p></div><div className="curated-import-actions">{available.map(({ demoCase, asset }) => <button type="button" className={selected?.src === asset.src ? "selected" : ""} key={asset.src} onClick={() => onSelect(demoCase, asset)}><span>Import demo image</span><strong>{demoCase.shortTitle}</strong><small>{asset.src.split("/").at(-1)}</small></button>)}</div></section>;
-}
-
-function CuratedViewer({ asset }: { asset: DemoAsset }) {
-  return <div className="curated-grid"><figure className="curated-panel"><figcaption>{modalityTitle(asset.modality)}<span>Curated reference image</span></figcaption><div className="curated-image"><Image src={asset.src} alt={asset.alt} width={1000} height={760} priority /></div></figure></div>;
-}
-
-function UploadWorkspace({ title, modality, state, series, onImport, setState }: { title: string; modality: Modality; state: UploadState; series: DicomSeries | null; onImport: ReviewProps["onImport"]; setState: React.Dispatch<React.SetStateAction<UploadState>> }) {
+function ModalityWorkspace({ modality, asset, demoCase, upload, setUpload, onImport, result, analyzing, onAnalyze, selectedPhase, setSelectedPhase }: { modality: Modality; asset: DemoAsset | null; demoCase: DemoCase; upload: UploadState; setUpload: (state: UploadState) => void; onImport: (files: FileList | null) => void; result: AnalysisResult | null; analyzing: boolean; onAnalyze: () => void; selectedPhase: SialographyPhase; setSelectedPhase: (phase: SialographyPhase) => void }) {
+  const series = upload.series.find((item) => item.uid === upload.selectedUid) ?? upload.series[0] ?? null;
+  const predefined = getDemoResult(demoCase, modality);
+  const hasImported = Boolean(series || upload.fallback.length);
   const directory = modality === "cbct_3d";
-  const inputProps = directory ? ({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>) : {};
-  return <section className="upload-workspace"><div className="upload-topline"><div><span className="section-label">{title}</span><p>{directory ? "Select a folder or multiple DICOM files for MPR, or a JPG/PNG exported reference for sequential viewing." : "Select DICOM, JPG, or PNG files. Multiple images preserve examination order."}</p></div>{directory ? <div className="file-button-group"><label className="file-button">Select DICOM folder<input type="file" multiple accept=".dcm,application/dicom" {...inputProps} onChange={(event) => void onImport(event.target.files)} /></label><label className="file-button secondary">Select files<input type="file" multiple accept=".dcm,application/dicom,image/jpeg,image/png" onChange={(event) => void onImport(event.target.files)} /></label></div> : <label className="file-button">Select images<input type="file" multiple accept=".dcm,application/dicom,image/jpeg,image/png" onChange={(event) => void onImport(event.target.files)} /></label>}</div>
-    {state.total > 0 && state.progress < state.total && <div className="progress-row"><progress value={state.progress} max={state.total} /><span>Reading {state.progress} of {state.total}</span></div>}
-    {state.error && <div className="error-banner"><strong>Unable to load images</strong><span>{state.error}</span></div>}
-    {state.series.length > 1 && <label className="series-selector">DICOM series<select value={state.selectedUid} onChange={(event) => setState((value) => ({ ...value, selectedUid: event.target.value }))}>{state.series.map((item) => <option value={item.uid} key={item.uid}>{item.description} · {item.modality} · {item.instances.length} images</option>)}</select></label>}
-    {series?.warning && <div className="warning-banner">{series.warning}</div>}
-    <Suspense fallback={<div className="viewer-loading">Loading medical viewer…</div>}>
-      {series && modality === "cbct_3d" && <MprViewer series={series} />}
-      {series && modality !== "cbct_3d" && <StackViewer series={series} />}
-      {state.fallback.length > 0 && <ImageViewer key={state.fallback[0].src} images={state.fallback} />}
-      {!series && state.fallback.length === 0 && !state.error && <div className="drop-empty"><strong>No images loaded</strong><span>Use the selector above. Patient files stay local to this browser.</span></div>}
-    </Suspense>
-    {series && <MetadataPanel series={series} />}
-  </section>;
+  const directoryProps = directory ? ({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>) : {};
+  return <div className="modality-workspace">{modality === "sialography_2d" && <PhaseStrip available={predefined?.phasesAvailable ?? []} selected={selectedPhase} onSelect={setSelectedPhase} />}{predefined?.safetyNotices.map((notice) => <SafetyBanner key={notice} text={notice} />)}<section className="viewer-frame"><div className="viewer-toolbar"><div><button className="tool-active">W/L</button><button>Pan</button><button>Zoom</button><button>Measure</button><button>Reset</button></div><span>{asset ? asset.kind === "synthetic-schematic" ? "SYNTHETIC EDUCATIONAL EXAMPLE" : "CURATED REFERENCE" : "LOCAL STUDY"}</span><label className="import-button">Import {directory ? "DICOM folder" : "images"}<input type="file" multiple accept={directory ? ".dcm,application/dicom" : ".dcm,application/dicom,image/jpeg,image/png,video/mp4"} {...directoryProps} onChange={(event) => onImport(event.target.files)} /></label></div><Suspense fallback={<div className="viewer-empty">Loading imaging runtime…</div>}>{hasImported ? <ImportedViewer modality={modality} upload={upload} series={series} setUpload={setUpload} /> : asset ? <CuratedMedicalViewer asset={asset} modality={modality} /> : <div className="viewer-empty"><b>No {modalityNames[modality]} asset in this case</b><span>Import a local study for image review. Arbitrary uploads do not trigger simulated diagnosis.</span></div>}</Suspense>{asset && <div className="image-provenance"><span>{asset.sourceLabel}</span><span>Aspect ratio preserved · No diagnostic crop</span></div>}</section>{upload.error && <div className="error-banner"><b>Unsupported or unreadable file</b><span>{upload.error}</span></div>}{series && <MetadataPanel series={series} />}{modality === "cbct_3d" && asset && !series && <div className="truth-note"><b>Reference only — not a reconstructed volume</b><span>Import a spatially valid DICOM series above to activate real axial, coronal, and sagittal MPR.</span></div>}<div className="analysis-command"><div><span>{predefined ? "Deterministic case logic available" : "Image review only"}</span><b>{result ? "Analysis complete — review the reasoning panel" : "Ready for clinician-initiated analysis"}</b></div><button onClick={onAnalyze} disabled={!asset || !predefined || analyzing}>{analyzing ? "Analyzing…" : result ? "Run again" : "Analyze curated case"}</button></div></div>;
+}
+
+function ImportedViewer({ modality, upload, series, setUpload }: { modality: Modality; upload: UploadState; series: DicomSeries | null; setUpload: (state: UploadState) => void }) {
+  return <>{upload.progress > 0 && upload.progress < upload.total && <div className="progress-row"><progress value={upload.progress} max={upload.total} /><span>Reading {upload.progress} / {upload.total}</span></div>}{upload.series.length > 1 && <label className="series-selector">Series<select value={upload.selectedUid} onChange={(event) => setUpload({ ...upload, selectedUid: event.target.value })}>{upload.series.map((item) => <option value={item.uid} key={item.uid}>{item.description} · {item.instances.length} images</option>)}</select></label>}{series?.warning && <div className="warning-banner">{series.warning}</div>}{series && modality === "cbct_3d" && <MprViewer series={series} />}{series && modality !== "cbct_3d" && <StackViewer series={series} />}{upload.fallback.length > 0 && <ImageViewer key={upload.fallback[0].src} images={upload.fallback} />}</>;
+}
+
+function CuratedMedicalViewer({ asset, modality }: { asset: DemoAsset; modality: Modality }) {
+  return <div className={`curated-medical-viewer ${modality}`}><Image src={asset.src} alt={asset.alt} width={1200} height={800} priority />{modality === "ultrasound" && <CineControls />}{modality === "sialography_2d" && <div className="orientation-marker">R</div>}<div className="viewer-overlay top-left"><span>SALIFUSION · {modalityNames[modality].toUpperCase()}</span><span>DEMO STUDY / DE-IDENTIFIED</span></div><div className="viewer-overlay bottom-right"><span>ZOOM 100%</span><span>W/L AUTO</span></div></div>;
+}
+
+function CineControls() {
+  const [playing, setPlaying] = useState(false);
+  const [frame, setFrame] = useState(18);
+  useEffect(() => { if (!playing) return; const id = globalThis.setInterval(() => setFrame((value) => value >= 59 ? 0 : value + 1), 90); return () => globalThis.clearInterval(id); }, [playing]);
+  return <div className="cine-controls"><button onClick={() => setPlaying((value) => !value)}>{playing ? "Ⅱ" : "▶"}</button><input aria-label="Cine frame" type="range" min="0" max="59" value={frame} onChange={(event) => setFrame(Number(event.target.value))} /><span>{String(frame + 1).padStart(2, "0")} / 60</span><b>SIMULATED LIVE ULTRASOUND REPLAY</b></div>;
+}
+
+function PhaseStrip({ available, selected, onSelect }: { available: SialographyPhase[]; selected: SialographyPhase; onSelect: (phase: SialographyPhase) => void }) {
+  return <section className="phase-strip"><div><span>Acquisition phases</span><b>Partial studies are supported</b></div>{allPhases.map((phase, index) => { const present = available.includes(phase); return <button key={phase} className={`${selected === phase ? "selected" : ""} ${present ? "present" : "missing"}`} onClick={() => present && onSelect(phase)} disabled={!present}><i>{index + 1}</i><span>{phase}<small>{present ? "Available" : "Not supplied"}</small></span></button>; })}</section>;
+}
+
+function FusionWorkspace({ studies, result, onOpen }: { studies: AnalyzedStudy[]; result: AnalysisResult | null; onOpen: (section: WorkspaceSection) => void }) {
+  if (studies.length < 2 || !result) return <div className="fusion-empty"><div className="fusion-orbit"><span>US</span><span>2D</span><span>3D</span></div><h2>Fusion activates automatically</h2><p>Analyze two modalities for the same patient ID, gland, and laterality. No separate “multimodal examination” is required.</p><div>{(["ultrasound", "sialography_2d", "cbct_3d"] as Modality[]).map((item) => <button key={item} onClick={() => onOpen(item)}>{modalityNames[item]}</button>)}</div></div>;
+  return <div className="fusion-workspace"><div className="fusion-banner"><span><i /> Automatic fusion active</span><b>{studies.map((study) => modalityNames[study.modality]).join(" + ")}</b><small>Identity, gland, and laterality match confirmed</small></div><div className="fusion-images">{studies.slice(0, 2).map((study) => <figure key={study.modality}><Image src={study.asset.src} alt={study.asset.alt} width={720} height={520} /><figcaption><b>{modalityNames[study.modality]}</b><span>{study.result.observedFindings[0]}</span></figcaption></figure>)}</div><section className="correspondence"><header><span>Anatomical correspondence</span><b>What each modality contributes</b></header><div><article><span>Concordant</span><p>{result.complementaryFindings?.[0] ?? "The reviewed structures are clinically compatible."}</p></article><article><span>Complementary</span><p>{result.complementaryFindings?.[1] ?? "Each modality answers a different part of the diagnostic question."}</p></article><article className={result.conflictingFindings?.length ? "warning" : ""}><span>Discordant</span><p>{result.conflictingFindings?.join(" ") || "No predefined discordance in this paired case."}</p></article><article><span>Missing</span><p>{result.missingEvidence.join(" · ")}</p></article></div></section></div>;
+}
+
+function DiagnosticRail({ patient, result, safetyNotices }: { patient: PatientInfo; result: AnalysisResult | null; safetyNotices: string[] }) {
+  const recommendations = result?.recommendations ?? recommendImaging(patient, result);
+  return <aside className="diagnostic-rail"><div className="rail-heading"><span>Diagnostic reasoning</span><b>Explainable output</b></div>{safetyNotices.map((notice) => <SafetyBanner key={notice} text={notice} compact />)}{result ? <><div className="diagnostic-impression"><span>{result.modality === "multimodal" ? "Integrated assessment" : "Suggested assessment"}</span><b>{result.assessment}</b></div><div className="confidence-row"><span>Illustrative demo confidence</span><b className={result.confidence.toLowerCase()}>{result.confidence}</b><small>Not clinically validated</small></div><ReasoningGroup index="01" title="Observed findings" items={result.observedFindings} /><ReasoningGroup index="02" title="Pattern interpretation" items={result.patternInterpretations} /><ReasoningGroup index="03" title="Differential diagnoses" items={result.differentials} /><ReasoningGroup index="04" title="Missing evidence" items={result.missingEvidence} muted />{result.ductMap?.length ? <section className="duct-map"><header><span>05</span><b>Ductal map</b></header>{result.ductMap.map((item) => <div key={`${item.structure}-${item.location}`}><b>{item.structure}</b><span>{item.location}</span><p>{item.finding}{item.extent ? ` · ${item.extent}` : ""}</p></div>)}</section> : null}</> : <div className="reasoning-empty"><span>◌</span><b>No image interpretation yet</b><p>Clinical recommendations below use the structured history only.</p></div>}<section className="recommendation-group"><header><span>Next-step decision support</span><b>{recommendations.length} recommendation{recommendations.length === 1 ? "" : "s"}</b></header>{recommendations.map((item) => <RecommendationCard key={`${item.modality}-${item.priority}`} item={item} compact />)}</section><div className="clinical-disclaimer"><b>Clinician review required</b><span>Educational deterministic logic; not a medical device or autonomous diagnosis.</span></div></aside>;
+}
+
+function ReasoningGroup({ index, title, items, muted }: { index: string; title: string; items: string[]; muted?: boolean }) { return <section className={`reasoning-group ${muted ? "muted" : ""}`}><header><span>{index}</span><b>{title}</b></header>{items.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <p>None listed for this curated result.</p>}</section>; }
+function SafetyBanner({ text, compact }: { text: string; compact?: boolean }) { return <div className={`safety-banner ${compact ? "compact" : ""}`}><span>!</span><div><b>Safety notice</b><p>{text}</p></div></div>; }
+function RecommendationCard({ item, compact }: { item: AnalysisResult["recommendations"][number]; compact?: boolean }) { return <article className={`recommendation-card ${item.priority.toLowerCase().replaceAll(" ", "-")} ${compact ? "compact" : ""}`}><header><span>{item.priority}</span><b>{item.modality}</b></header><p>{item.rationale}</p>{!compact && <><dl><div><dt>Expected contribution</dt><dd>{item.expectedContribution}</dd></div><div><dt>Safety</dt><dd>{item.safety}</dd></div></dl><small>Alternatives: {item.alternatives.join(" · ")}</small></>}</article>; }
+
+function StudyTimeline({ studies, active, setActive, result, onReport }: { studies: AnalyzedStudy[]; active: WorkspaceSection; setActive: (section: WorkspaceSection) => void; result: AnalysisResult | null; onReport: () => void }) {
+  return <footer className="study-timeline"><div className="timeline-title"><span>Study timeline</span><b>{studies.length ? `${studies.length} analyzed acquisition${studies.length > 1 ? "s" : ""}` : "No analyzed imaging"}</b></div><div className="timeline-items">{studies.length ? studies.map((study, index) => <button key={study.modality} className={active === study.modality ? "active" : ""} onClick={() => setActive(study.modality)}><i>{index + 1}</i><span><b>{modalityNames[study.modality]}</b><small>{study.result.assessment}</small></span></button>) : <span className="timeline-empty">Analyze an independent imaging pathway to build the patient timeline.</span>}{studies.length > 1 && <button className={active === "fusion" ? "active fusion" : "fusion"} onClick={() => setActive("fusion")}><i>FX</i><span><b>Automatic fusion</b><small>{result?.concordance ?? "Ready"}</small></span></button>}</div><button className="timeline-report" disabled={!studies.length} onClick={onReport}>Create report <span>→</span></button></footer>;
 }
 
 function MetadataPanel({ series }: { series: DicomSeries }) {
   const meta = series.instances[0]?.metadata;
-  const rows = [["Series", meta.seriesDescription || "Not provided"], ["Modality", meta.modality || "Not provided"], ["Instances", String(series.instances.length)], ["Dimensions", meta.rows && meta.columns ? `${meta.columns} × ${meta.rows}` : "Not provided"], ["Pixel spacing", meta.pixelSpacing?.join(" × ") || "Not provided"], ["Slice thickness", meta.sliceThickness ? `${meta.sliceThickness} mm` : "Not provided"], ["Transfer syntax", meta.transferSyntax || "Not provided"], ["Spatial sorting", series.spatiallySorted ? "Image Position + Orientation" : "Instance Number fallback"]];
-  return <details className="metadata-panel"><summary>DICOM metadata</summary><dl>{rows.map(([term, value]) => <div key={term}><dt>{term}</dt><dd>{value}</dd></div>)}</dl><p>Patient/study identifiers are read locally and are not transmitted by this demo.</p></details>;
+  const rows = [["Series", meta.seriesDescription || "Not provided"], ["Modality", meta.modality || "Not provided"], ["Instances", String(series.instances.length)], ["Dimensions", meta.rows && meta.columns ? `${meta.columns} × ${meta.rows}` : "Not provided"], ["Pixel spacing", meta.pixelSpacing?.join(" × ") || "Not provided"], ["Slice thickness", meta.sliceThickness ? `${meta.sliceThickness} mm` : "Not provided"], ["Spatial sorting", series.spatiallySorted ? "Image Position + Orientation" : "Instance Number fallback"]];
+  return <details className="metadata-panel"><summary>DICOM metadata · processed locally</summary><dl>{rows.map(([term, value]) => <div key={term}><dt>{term}</dt><dd>{value}</dd></div>)}</dl></details>;
 }
 
-function ResultsScreen({ result, studies, onBack, onAdd, onReport, onConcordance }: { result: AnalysisResult; studies: AnalyzedStudy[]; onBack: () => void; onAdd: () => void; onReport: () => void; onConcordance: (value: Concordance) => void }) {
-  const isMultimodal = studies.length > 1;
-  return <PageShell eyebrow="Step 4" title={isMultimodal ? "Automatic multimodal result" : "Analysis results"} intro={isMultimodal ? "Multiple analyzed modalities were detected for this patient and fused automatically." : "Structured demonstration output for clinician review."}><div className="disclaimer"><strong>Simulated AI output — proof-of-concept demonstration.</strong><span>Image import and visualization are functional.</span></div>{isMultimodal && <><div className="auto-fusion-notice"><strong>Automatic fusion active</strong><span>{studies.map((study) => modalityTitle(study.modality)).join(" + ")}</span></div><div className="combined-study-grid">{studies.map((study) => <section key={`${study.caseId}-${study.modality}`}><span>{modalityTitle(study.modality)}</span><strong>{study.result.assessment}</strong><BulletList items={study.result.findings} /></section>)}</div><label className="demo-state-control">Competition fusion state<select value={result.concordance ?? "High Concordance"} onChange={(e) => onConcordance(e.target.value as Concordance)}><option>High Concordance</option><option>Partial Concordance</option><option>Discordance Detected</option></select><small>This control preserves the demonstration of concordant, partially concordant, and discordant states.</small></label></>}<div className="results-layout"><section className="result-primary"><ResultSection title={isMultimodal ? "Integrated findings" : "Detected findings"} items={result.findings} /><ResultSection title={isMultimodal ? "Integrated assessment" : "Suggested assessment"} items={[result.assessment]} /><ResultSection title="Differential diagnoses" items={result.differentials.slice(0, 2)} /></section><aside className="result-summary"><div><span>Image quality</span><strong>{result.imageQuality}</strong></div><div><span>Confidence</span><strong className={`confidence ${result.confidence.toLowerCase()}`}>{result.confidence}</strong></div>{result.concordance && <div><span>Cross-modal concordance</span><strong className={result.concordance === "Discordance Detected" ? "discordance" : ""}>{result.concordance === "Discordance Detected" ? "Cross-Modal Discordance Detected" : result.concordance}</strong></div>}</aside></div><div className="support-grid"><ResultSection title="Supporting imaging features" items={result.supportingFeatures} />{result.complementaryFindings?.length ? <ResultSection title="Complementary findings" items={result.complementaryFindings} /> : null}{result.conflictingFindings?.length ? <ResultSection title="Conflicting findings" items={result.conflictingFindings} tone="warning" /> : null}<ResultSection title="Additional Imaging Recommendation" items={[result.additionalImagingRecommendation]} /></div><div className="result-actions"><button type="button" className="button button-secondary" onClick={onBack}>Back to images</button><div><button type="button" className="button button-secondary" onClick={onAdd}>Add Another Modality</button><button type="button" className="button button-primary" onClick={onReport}>{isMultimodal ? "Generate Integrated Report" : "Generate Report"}</button></div></div></PageShell>;
-}
-
-function ResultSection({ title, items, tone }: { title: string; items: string[]; tone?: "warning" }) {
-  return <section className={`result-section ${tone ?? ""}`}><h3>{title}</h3>{items.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <p>None identified in the curated output.</p>}</section>;
-}
-
-function ReportScreen({ report, clinicianNote, setClinicianNote, onReview, onBack, onNew }: { report: IntegratedReport; clinicianNote: string; setClinicianNote: (value: string) => void; onReview: (value: ReviewDecision) => void; onBack: () => void; onNew: () => void }) {
+function ReportScreen({ report, clinicianNote, setClinicianNote, onReview, onBack, onDownload, onHome }: { report: IntegratedReport; clinicianNote: string; setClinicianNote: (value: string) => void; onReview: (value: ReviewDecision) => void; onBack: () => void; onDownload: () => void; onHome: () => void }) {
   const { patient, result, studies } = report;
-  const isMultimodal = studies.length > 1;
-  return <main className="report-page"><div className="report-actions no-print"><button type="button" className="text-button" onClick={onBack}>← Results</button><div><button type="button" className="button button-secondary" onClick={() => window.print()}>Print / Save PDF</button><button type="button" className="button button-primary" onClick={onNew}>New analysis</button></div></div><article className="report-sheet"><header><div><span className="report-logo">SF</span><div><strong>SaliFusion AI</strong><small>{isMultimodal ? "Integrated imaging report" : "Single-modality imaging report"} · proof of concept</small></div></div><span className={`review-status ${report.reviewDecision.toLowerCase()}`}>{report.reviewDecision}</span></header><div className="report-notice">Simulated AI output — proof-of-concept demonstration. Image import and visualization are functional.</div><ReportBlock title="Patient information"><ReportFacts items={[["Patient Name", patient.patientName], ["Patient ID", patient.patientId], ["Age", patient.age], ["Sex", patient.sex], ["Gland", patient.gland], ["Side", patient.side]]} /></ReportBlock><ReportBlock title="Clinical history / notes"><p><strong>Symptoms:</strong> {patient.symptoms.length ? patient.symptoms.join(", ") : "No symptoms selected."}</p><p>{patient.clinicalNotes || "No additional clinical history entered."}</p></ReportBlock>{studies.map((study) => <ReportBlock title={`${modalityTitle(study.modality)} findings`} key={`${study.caseId}-${study.modality}`}><BulletList items={study.result.findings} /><p><strong>Modality assessment:</strong> {study.result.assessment}</p></ReportBlock>)}{isMultimodal && result.concordance && <ReportBlock title="Cross-modal concordance / discordance"><p>{result.concordance === "Discordance Detected" ? "Cross-Modal Discordance Detected" : result.concordance}</p><BulletList items={[...(result.complementaryFindings ?? []), ...(result.conflictingFindings ?? [])]} /></ReportBlock>}<ReportBlock title={isMultimodal ? "Integrated assessment" : "Suggested assessment"}><p className="assessment-line">{result.assessment}</p></ReportBlock><div className="report-two-col"><ReportBlock title="Differential diagnoses"><BulletList items={result.differentials.slice(0, 2)} /></ReportBlock><ReportBlock title="Confidence"><p>{result.confidence} <small>Curated qualitative demonstration value; not a validated probability.</small></p></ReportBlock></div><ReportBlock title="Supporting findings"><BulletList items={result.supportingFeatures} /></ReportBlock><ReportBlock title="Additional imaging recommendation"><p>{result.additionalImagingRecommendation}</p></ReportBlock>{result.conflictingFindings?.length ? <ReportBlock title="Discordant findings"><BulletList items={result.conflictingFindings} /></ReportBlock> : null}<ReportBlock title="Clinician review"><textarea className="no-print" value={clinicianNote} onChange={(e) => setClinicianNote(e.target.value)} placeholder="Optional clinician note or modification rationale" /><p className="print-only">{report.clinicianNote || "No clinician note entered."}</p><div className="review-controls no-print"><button type="button" className={report.reviewDecision === "Accepted" ? "active accept" : ""} onClick={() => onReview("Accepted")}>Accept</button><button type="button" className={report.reviewDecision === "Modified" ? "active modify" : ""} onClick={() => onReview("Modified")}>Modify</button><button type="button" className={report.reviewDecision === "Rejected" ? "active reject" : ""} onClick={() => onReview("Rejected")}>Reject</button></div></ReportBlock><footer>Generated {new Date(report.generatedAt).toLocaleString()} · Research demonstration only · Not for clinical diagnosis</footer></article></main>;
+  return <main className="report-page"><div className="report-toolbar no-print"><button onClick={onBack}>← Workstation</button><div><button onClick={() => window.print()}>Print</button><button className="download" onClick={onDownload}>Download PDF</button><button onClick={onHome}>New study</button></div></div><article className="report-sheet"><header><Brand /><div><span>STRUCTURED IMAGING REPORT</span><b className={report.reviewDecision.toLowerCase()}>{report.reviewDecision}</b></div></header><div className="report-warning">Educational deterministic demonstration · Not clinically validated · Clinician review required</div><section className="report-patient"><div><span>Patient</span><b>{patient.patientName}</b></div><div><span>ID</span><b>{patient.patientId}</b></div><div><span>Age / Sex</span><b>{patient.age} / {patient.sex}</b></div><div><span>Site</span><b>{patient.side} {patient.gland}</b></div><div><span>Course</span><b>{patient.symptomCourse}</b></div></section><ReportBlock title="Clinical indication"><p>{report.clinicalInformation.join(" · ")}</p></ReportBlock>{studies.map((study) => <ReportBlock title={`${modalityNames[study.modality]} findings`} key={study.modality}><BulletList items={study.result.observedFindings} />{study.result.phasesAvailable && <p><b>Available phases:</b> {study.result.phasesAvailable.join(", ")}</p>}{study.result.ductMap?.length ? <div className="report-duct-map">{study.result.ductMap.map((item) => <p key={`${item.structure}-${item.location}`}><b>{item.structure} · {item.location}:</b> {item.finding}{item.extent ? ` (${item.extent})` : ""}</p>)}</div> : null}</ReportBlock>)}{result.modality === "multimodal" && <ReportBlock title="Cross-modal fusion"><BulletList items={[...(result.complementaryFindings ?? []), ...(result.conflictingFindings ?? [])]} /></ReportBlock>}<ReportBlock title="Diagnostic impression"><p className="report-impression">{result.assessment}</p><p><b>Differential:</b> {result.differentials.join(" · ") || "None listed"}</p><p><b>Illustrative Demo Confidence — Not Clinically Validated:</b> {result.confidence}</p></ReportBlock><ReportBlock title="Recommendations">{result.recommendations.map((item) => <div className="report-recommendation" key={item.modality}><b>{item.priority} · {item.modality}</b><p>{item.rationale}</p><p><b>Expected contribution:</b> {item.expectedContribution}</p><p><b>Safety:</b> {item.safety}</p><p><b>Alternatives:</b> {item.alternatives.join(", ")}</p></div>)}</ReportBlock>{result.safetyNotices.length > 0 && <ReportBlock title="Contraindication warnings"><BulletList items={result.safetyNotices} /></ReportBlock>}<ReportBlock title="Limitations and uncertainty"><BulletList items={[...result.limitations, ...result.missingEvidence.map((item) => `Missing evidence: ${item}`)]} /></ReportBlock><ReportBlock title="Clinician review"><textarea className="no-print" value={clinicianNote} onChange={(event) => setClinicianNote(event.target.value)} placeholder="Add clinician note or modification rationale" /><p className="print-only">{report.clinicianNote || "No clinician note entered."}</p><div className="review-buttons no-print">{(["Accepted", "Modified", "Rejected"] as ReviewDecision[]).map((decision) => <button key={decision} className={report.reviewDecision === decision ? "active" : ""} onClick={() => onReview(decision)}>{decision.replace("ed", "")}</button>)}</div></ReportBlock><footer>Generated {new Date(report.generatedAt).toLocaleString()} · SaliFusion research demonstration</footer></article></main>;
 }
 
-function ReportBlock({ title, children }: { title: string; children: React.ReactNode }) { return <section className="report-block"><h3>{title}</h3>{children}</section>; }
-function ReportFacts({ items }: { items: [string, string][] }) { return <dl className="report-facts">{items.map(([term, value]) => <div key={term}><dt>{term}</dt><dd>{value || "Not provided"}</dd></div>)}</dl>; }
-function BulletList({ items }: { items: string[] }) { return items.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <p>Not separately specified.</p>; }
-function PageShell({ eyebrow, title, intro, children }: { eyebrow: string; title: string; intro: string; children: React.ReactNode }) { return <main className="page-shell"><header className="page-title"><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{intro}</p></header>{children}</main>; }
-function Navigation({ onBack, onNext, nextDisabled, nextLabel }: { onBack: () => void; onNext?: () => void; nextDisabled?: boolean; nextLabel?: string }) { return <div className="page-navigation"><button type="button" className="button button-secondary" onClick={onBack}>Back</button>{onNext && <button type="button" className="button button-primary" disabled={nextDisabled} onClick={onNext}>{nextLabel ?? "Continue"}</button>}</div>; }
+function ReportBlock({ title, children }: { title: string; children: React.ReactNode }) { return <section className="report-block"><h2>{title}</h2>{children}</section>; }
+function BulletList({ items }: { items: string[] }) { return items.length ? <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul> : <p>None identified in the curated output.</p>; }

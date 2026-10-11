@@ -25,6 +25,5 @@ export class SialographyAnalysisService implements AnalysisService {
 
 export function serviceForCase(_demoCase: DemoCase, modality: Modality): AnalysisService {
   if (modality === "ultrasound") return new UltrasoundAnalysisService();
-  if (modality === "mr_sialography") throw new Error("No predefined MR Sialography demonstration case is currently packaged.");
   return new SialographyAnalysisService();
 }

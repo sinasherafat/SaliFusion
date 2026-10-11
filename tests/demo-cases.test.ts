@@ -1,81 +1,91 @@
 import { describe, expect, it } from "vitest";
-import { DEMO_CASES, findCuratedAsset, getDemoResult } from "@/data/demo-cases";
+import { DEMO_CASES, getDemoResult } from "@/data/demo-cases";
+import { deriveSafetyNotices, recommendImaging } from "@/lib/clinical/recommendation-engine";
+import { createReportPdf } from "@/lib/report/pdf";
 import { serviceForCase } from "@/services/analysis";
 import { FusionService } from "@/services/fusion-service";
 import { ReportService } from "@/services/report-service";
-import type { AnalyzedStudy, PatientInfo } from "@/types/salifusion";
+import { patientStudyKey } from "@/types/salifusion";
+import type { AnalyzedStudy } from "@/types/salifusion";
 
-describe("curated SaliFusion demonstration cases", () => {
-  it("contains six clinical cases without fabricated performance metrics", () => {
-    expect(DEMO_CASES).toHaveLength(6);
+describe("competition case library", () => {
+  it("contains the eight requested deterministic educational scenarios", () => {
+    expect(DEMO_CASES).toHaveLength(8);
+    expect(DEMO_CASES.map((item) => item.id)).toEqual(["normal-anatomy", "distal-wharton-calculus", "occult-obstruction", "long-segment-stenosis", "sjogren-pattern", "kussmaul-like", "acute-suppurative", "focal-mass"]);
+  });
+
+  it("does not contain fabricated performance statistics", () => {
     const output = JSON.stringify(DEMO_CASES).toLowerCase();
     for (const forbidden of ["sensitivity", "specificity", "auc", "dice score", "accuracy"]) expect(output).not.toContain(forbidden);
   });
 
-  it("keeps differentials concise and gives every packaged result an imaging recommendation", () => {
-    for (const item of DEMO_CASES) {
-      const results = [item.result, ...Object.values(item.modalityResults ?? {}), ...(item.fusionResult ? [item.fusionResult] : [])];
-      for (const result of results) {
-        expect(result.differentials.length).toBeLessThanOrEqual(2);
-        expect(result.additionalImagingRecommendation.length).toBeGreaterThan(10);
-      }
+  it("labels every image source and every synthetic asset", () => {
+    for (const item of DEMO_CASES) for (const asset of item.assets) {
+      expect(asset.sourceLabel.length).toBeGreaterThan(15);
+      if (asset.src.endsWith(".svg")) expect(asset.kind).toBe("synthetic-schematic");
     }
-  });
-
-  it("supports the specified single-modality recommendation logic", () => {
-    expect(DEMO_CASES.find((item) => item.id === "sialolith-ultrasound")?.result.additionalImagingRecommendation).toMatch(/no additional imaging/i);
-    expect(DEMO_CASES.find((item) => item.id === "sjogren-2d")?.result.additionalImagingRecommendation).toMatch(/may not be necessary/i);
-    expect(DEMO_CASES.find((item) => item.id === "sjogren-cbct")?.result.additionalImagingRecommendation).toMatch(/no additional modality/i);
-  });
-
-  it("recognizes exact curated filenames only within the selected modality", () => {
-    expect(findCuratedAsset("ball-in-hand-sialography.jpg", "sialography_2d")?.demoCase.id).toBe("space-occupying-lesion");
-    expect(findCuratedAsset("tumor-ultrasound.jpg", "ultrasound")?.demoCase.id).toBe("space-occupying-lesion");
-    expect(findCuratedAsset("unknown.png", "ultrasound")).toBeNull();
-    expect(findCuratedAsset("tumor-ultrasound.jpg", "sialography_2d")).toBeNull();
-  });
-
-  it("returns a structured simulated result through the selected modality service", async () => {
-    const item = DEMO_CASES[3];
-    const result = await serviceForCase(item, item.modality).analyze(item, item.modality);
-    expect(result.caseId).toBe(item.id);
-    expect(result.isCuratedDemoCase).toBe(true);
-    expect(result.demoOnly).toBe(true);
   });
 });
 
-describe("automatic fusion and report layers", () => {
-  const demoCase = DEMO_CASES[0];
-  const sialography = getDemoResult(demoCase, "sialography_2d");
-  const ultrasound = getDemoResult(demoCase, "ultrasound");
-  if (!sialography || !ultrasound) throw new Error("Expected paired curated results.");
-  const studies: AnalyzedStudy[] = [
-    { caseId: demoCase.id, modality: "sialography_2d", asset: demoCase.assets[0], result: sialography },
-    { caseId: demoCase.id, modality: "ultrasound", asset: demoCase.assets[1], result: ultrasound },
-  ];
+describe("independent modality workflows", () => {
+  it.each([
+    ["distal-wharton-calculus", "ultrasound"],
+    ["long-segment-stenosis", "sialography_2d"],
+    ["long-segment-stenosis", "cbct_3d"],
+  ] as const)("analyzes %s through its %s service without a prerequisite modality", async (caseId, modality) => {
+    const demoCase = DEMO_CASES.find((item) => item.id === caseId)!;
+    const output = await serviceForCase(demoCase, modality).analyze(demoCase, modality);
+    expect(output.modality).toBe(modality);
+    expect(output.observedFindings.length).toBeGreaterThan(0);
+  });
 
-  it("automatically creates the predefined high-concordance fusion result", () => {
+  it("reports supported findings and missing evidence when phases are incomplete", () => {
+    const demoCase = DEMO_CASES.find((item) => item.id === "distal-wharton-calculus")!;
+    const result = getDemoResult(demoCase, "sialography_2d")!;
+    expect(result.phasesAvailable).toEqual(["Ductal filling"]);
+    expect(result.missingEvidence.join(" ")).toMatch(/evacuation/i);
+  });
+});
+
+describe("adaptive recommendations and safety", () => {
+  it("blocks routine contrast sialography during suspected acute suppurative infection", () => {
+    const patient = DEMO_CASES.find((item) => item.id === "acute-suppurative")!.patient;
+    expect(deriveSafetyNotices(patient).join(" ")).toMatch(/inappropriate/i);
+    expect(recommendImaging(patient)[0]).toMatchObject({ modality: "Contrast sialography", priority: "Currently inappropriate" });
+  });
+
+  it("does not automatically route a Sjögren presentation to contrast sialography", () => {
+    const patient = DEMO_CASES.find((item) => item.id === "sjogren-pattern")!.patient;
+    expect(recommendImaging(patient)[0].modality).toMatch(/clinical \/ laboratory/i);
+  });
+
+  it("recommends dedicated ductal evaluation for Kussmaul-like symptoms", () => {
+    const patient = DEMO_CASES.find((item) => item.id === "kussmaul-like")!.patient;
+    expect(recommendImaging(patient)[0]).toMatchObject({ modality: "Dedicated ductal evaluation", priority: "Preferred" });
+  });
+});
+
+describe("automatic fusion and reporting", () => {
+  const demoCase = DEMO_CASES.find((item) => item.id === "occult-obstruction")!;
+  const makeStudy = (modality: "ultrasound" | "sialography_2d"): AnalyzedStudy => ({ caseId: demoCase.id, modality, asset: demoCase.assets.find((item) => item.modality === modality)!, result: getDemoResult(demoCase, modality)!, patientKey: patientStudyKey(demoCase.patient) });
+
+  it("activates predefined fusion when patient, gland, and laterality match", () => {
+    const output = new FusionService().combine([makeStudy("ultrasound"), makeStudy("sialography_2d")]);
+    expect(output.modality).toBe("multimodal");
+    expect(output.assessment).toMatch(/stenosis occult on ultrasound/i);
+  });
+
+  it("rejects automatic fusion when identity or laterality does not match", () => {
+    const second = { ...makeStudy("sialography_2d"), patientKey: "different|Parotid|Right" };
+    expect(() => new FusionService().combine([makeStudy("ultrasound"), second])).toThrow(/same patient ID, gland, and laterality/i);
+  });
+
+  it("generates a downloadable PDF byte stream", () => {
+    const studies = [makeStudy("ultrasound"), makeStudy("sialography_2d")];
     const result = new FusionService().combine(studies);
-    expect(result.modality).toBe("multimodal");
-    expect(result.concordance).toBe("High Concordance");
-    expect(result.assessment).toMatch(/space-occupying/i);
-  });
-
-  it("can demonstrate discordance without changing the input studies", () => {
-    const base = new FusionService().combine(studies);
-    const result = new FusionService().withConcordance(base, "Discordance Detected");
-    expect(result.confidence).toBe("Low");
-    expect(result.concordance).toBe("Discordance Detected");
-    expect(result.conflictingFindings?.length).toBeGreaterThan(0);
-  });
-
-  it("carries patient history and every analyzed modality into the report", () => {
-    const patient: PatientInfo = { patientName: "Demo Patient", patientId: "DEMO-01", age: "47", sex: "Female", gland: "Parotid", side: "Left", symptoms: ["Swelling"], clinicalNotes: "Painless recurrent swelling." };
-    const service = new ReportService();
-    const report = service.create(patient, studies, new FusionService().combine(studies));
-    const reviewed = service.review(report, "Accepted", "Reviewed by clinician.");
-    expect(reviewed.studies).toHaveLength(2);
-    expect(reviewed.clinicalInformation).toContain("Painless recurrent swelling.");
-    expect(reviewed.reviewDecision).toBe("Accepted");
+    const report = new ReportService().create(demoCase.patient, studies, result);
+    const bytes = createReportPdf(report);
+    expect(new TextDecoder().decode(bytes.slice(0, 8))).toBe("%PDF-1.4");
+    expect(bytes.length).toBeGreaterThan(1000);
   });
 });
