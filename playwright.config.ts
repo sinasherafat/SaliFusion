@@ -10,5 +10,5 @@ export default defineConfig({
   reporter: "line",
   use: { baseURL, trace: "retain-on-failure", viewport: { width: 1600, height: 1000 } },
   projects: [{ name: "chrome", use: { ...devices["Desktop Chrome"], channel: "chrome" } }],
-  webServer: { command: "next dev --webpack --port 4181", url: `${baseURL}/`, reuseExistingServer: true, timeout: 180_000 },
+  webServer: { command: "node node_modules/next/dist/bin/next dev --webpack --port 4181", url: `${baseURL}/`, reuseExistingServer: true, timeout: 180_000 },
 });

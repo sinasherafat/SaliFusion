@@ -1,26 +1,28 @@
 # SaliFusion
 
-Competition-ready educational demonstration of an equipment-integrated clinical imaging workstation for salivary gland and ductal disorders.
+Competition-ready, three-case educational demonstration of an equipment-integrated clinical imaging workflow for salivary gland and ductal disorders.
 
 ## What is implemented
 
+- Bright, focused landing and demo-entry experience with an original generated physician-workstation hero.
+- Exactly three featured journeys: obstructive sialolithiasis, acute unilateral parotitis, and suspected early Sjögren-related involvement.
+- Five persistent stages: History → Imaging → Modality Reports → Fusion → Final Report.
+- Thirty core history questions plus conditional contrast and procedural safety follow-ups.
 - Independent ultrasound, conventional 2D sialography, and 3D CBCT sialography workspaces.
 - Local DICOM parsing, series grouping, Cornerstone stack review, and genuine axial/coronal/sagittal MPR for spatially valid CBCT DICOM series.
-- Local JPG/PNG review with preserved aspect ratio and explicit unsupported-format states.
-- Simulated live ultrasound replay, always labeled as prerecorded/simulated.
+- Local JPG/PNG review, explicitly distinguished from true volumetric DICOM.
+- Six named ultrasound video slots with local video/image uploads, playback, speed control, and frame capture.
 - Four-phase 2D sialography model with partial-phase analysis and explicit missing-evidence statements.
-- Structured clinical history, conditional autoimmune/medication/contrast fields, and safety screening.
-- Explainable recommendation rules that distinguish preferred, optional, and currently inappropriate examinations.
-- Automatic multimodal fusion only when patient ID, gland, and laterality match.
-- Eight deterministic educational cases, including ultrasound-negative obstruction and acute-infection safety-stop scenarios.
-- Structured clinician-review report with browser printing and direct PDF download.
-- Competition Demo walkthrough for the high-impact occult-obstruction story.
+- Explainable green/amber/red pathway rules, including the acute-parotitis contrast-sialography safety stop.
+- Fusion only for reviewed modalities on a matching gland and side.
+- Independent modality PDFs, fusion PDF, and complete-case PDF.
+- Deterministic, case-configured diagnostic support scores that are explicitly illustrative and unvalidated.
 
 ## Important boundaries
 
-This is an educational deterministic demonstration, not a trained or clinically validated diagnostic model. Confidence labels are qualitative and explicitly unvalidated. Arbitrary uploaded studies can be viewed but do not receive fabricated diagnostic output.
+This is an educational deterministic demonstration, not a trained or clinically validated diagnostic model. Arbitrary uploaded studies can be viewed but do not inherit the preset diagnosis. Scenario findings remain marked as pending image verification until clinician review.
 
-The packaged JPG references were supplied with the project and retain source-permission warnings. New SVG assets are explicitly labeled synthetic educational schematics. The CBCT reference image is not presented as a reconstructed volume; true MPR activates only for compatible spatial DICOM data.
+The competition ultrasound manifest intentionally ships with six `awaiting-upload` slots. CBCT screenshots are never presented as reconstructed volumes; true MPR activates only for compatible spatial DICOM data.
 
 No patient files are uploaded by the application. PACS/DICOMweb and vendor SDK connections are future adapter points, not claimed implementations.
 
@@ -45,7 +47,7 @@ pnpm build
 pnpm test:e2e
 ```
 
-The automated tests cover independent modality services, missing sialography phases, acute-infection contraindication handling, Sjögren and Kussmaul recommendation logic, identity/laterality-gated fusion, PDF generation, and browser workflows.
+The automated tests cover the three featured cases, comprehensive history fixtures and editing, six media slots, conditional safety rules, partial sialography phases, CBCT pathway distinctions, identity-gated fusion, illustrative-score disclaimers, all PDF types, and browser workflows.
 
 ## Deployment
 
