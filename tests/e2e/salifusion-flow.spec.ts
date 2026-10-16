@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { readFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 async function enterDemo(page: import("@playwright/test").Page) {
   await page.goto("/");
@@ -54,6 +55,7 @@ test("case one supports independent findings and partial four-phase sialography"
 });
 
 test("case one browser-local media and image-bearing reports remain connected without upload requests", async ({ page }) => {
+  test.setTimeout(120_000);
   const writes: string[] = []; page.on("request", (request) => { if (["POST", "PUT", "PATCH"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`); });
   await enterDemo(page);
   await page.locator(".case-card").first().getByRole("button", { name: /Start Case/ }).click();
@@ -78,22 +80,73 @@ test("case one browser-local media and image-bearing reports remain connected wi
   await page.getByRole("button", { name: "Review educational reference findings" }).click();
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
 
-  async function downloadAndCountImages(buttonName: string | RegExp, expected: number) {
+  async function previewPdf(scope: import("@playwright/test").Locator, title: string) {
+    await scope.getByRole("button", { name: "View PDF" }).click();
+    const dialog = page.getByRole("dialog", { name: title });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Preview Ready")).toBeVisible();
+    const frame = dialog.getByTitle(`${title} PDF preview`);
+    await expect(frame).toHaveAttribute("src", /^blob:/);
+    const source = await frame.getAttribute("src");
+    const result = await page.evaluate(async (url) => {
+      const bytes = new Uint8Array(await (await fetch(url!)).arrayBuffer());
+      return { size: bytes.length, signature: new TextDecoder("windows-1252").decode(bytes.slice(0, 8)) };
+    }, source);
+    expect(result.signature).toBe("%PDF-1.4");
+    expect(result.size).toBeGreaterThan(1_000);
+    await dialog.getByRole("button", { name: "Close PDF preview" }).click();
+    await expect(dialog).toBeHidden();
+  }
+
+  async function downloadAndInspect(scope: import("@playwright/test").Locator, expectedImages: number, expectedText?: string, buttonName = "Download PDF") {
     const downloadPromise = page.waitForEvent("download");
-    await page.getByRole("button", { name: buttonName }).click();
+    await scope.getByRole("button", { name: buttonName }).click();
     const download = await downloadPromise; const path = await download.path(); expect(path).toBeTruthy();
     const bytes = await readFile(path!); const source = bytes.toString("latin1");
     expect(source.startsWith("%PDF-1.4")).toBe(true);
-    expect((source.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(expected);
+    expect((source.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(expectedImages);
+    expect(source).toContain("/MediaBox [0 0 595.28 841.89]");
+    expect(source).toContain("SaliFusion");
+    expect(source).toContain("Educational Research Demonstration - Not Clinically Validated");
+    expect(source).toContain("Page ");
+    if (expectedText) expect(source).toContain(expectedText);
+    if (process.env.PDF_QA_DIR) {
+      await mkdir(process.env.PDF_QA_DIR, { recursive: true });
+      await copyFile(path!, join(process.env.PDF_QA_DIR, download.suggestedFilename()));
+    }
   }
 
-  await downloadAndCountImages("Download Ultrasound PDF", 1);
-  await downloadAndCountImages("Download 2D Sialography PDF", 4);
+  await expect(page.getByRole("heading", { name: "Modality Reports" })).toBeVisible();
+  const ultrasoundReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Ultrasound Report" }) });
+  const sialographyReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Four-Phase Sialography Report" }) });
+  await expect(sialographyReport.locator(".phase-thumbnail-row img")).toHaveCount(4);
+  await expect(page.getByText("No CBCT study provided")).toBeVisible();
+  await previewPdf(ultrasoundReport, "Ultrasound Report");
+  await downloadAndInspect(ultrasoundReport, 1);
+  await previewPdf(sialographyReport, "Four-Phase Sialography Report");
+  await downloadAndInspect(sialographyReport, 4);
   await page.getByRole("button", { name: /Continue to Fusion/ }).click();
   await page.getByRole("button", { name: "Generate Fusion Analysis" }).click();
-  await downloadAndCountImages("Download Fusion PDF", 5);
+  await expect(page.getByRole("heading", { name: "Integrated Multimodal Assessment" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Final Imaging Impression" })).toBeVisible();
+  await page.getByRole("button", { name: "Modify Impression" }).click();
+  const editedImpression = "Clinician-edited impression for verification.";
+  await page.getByLabel("Final imaging impression").fill(editedImpression);
+  await page.getByRole("button", { name: "Mark as Reviewed" }).click();
+  await page.getByRole("button", { name: "View Fusion PDF" }).click();
+  const fusionDialog = page.getByRole("dialog", { name: "Fusion Report" });
+  await expect(fusionDialog).toBeVisible();
+  const fusionSource = await fusionDialog.getByTitle("Fusion Report PDF preview").getAttribute("src");
+  const fusionPdfText = await page.evaluate(async (url) => new TextDecoder("windows-1252").decode(await (await fetch(url!)).arrayBuffer()), fusionSource);
+  expect(fusionPdfText).toContain(editedImpression);
+  await fusionDialog.getByRole("button", { name: "Close PDF preview" }).click();
+  const fusionActions = page.locator(".fusion-pdf-actions");
+  await downloadAndInspect(fusionActions, 5, editedImpression, "Download Fusion PDF");
   await page.getByRole("button", { name: /Continue to Final Report/ }).click();
-  await downloadAndCountImages("Download Complete Case Report", 5);
+  await expect(page.getByRole("heading", { name: "SaliFusion Reports" })).toBeVisible();
+  const completeReport = page.locator(".report-center-grid article").filter({ has: page.getByRole("heading", { name: "Complete Case Report" }) });
+  await previewPdf(completeReport, "Complete Case Report");
+  await downloadAndInspect(completeReport, 5, editedImpression);
   expect(writes).toEqual([]);
 });
 
@@ -131,7 +184,7 @@ test("case four starts with an independent sialography pathway and reports five-
   await expect(page.getByText(/Incomplete contrast evacuation at five minutes/)).toBeVisible();
   await page.getByRole("button", { name: "Review educational reference findings" }).click();
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
-  await expect(page.getByText(/Educational reference reviewed · images pending/)).toBeVisible();
+  await expect(page.getByText("Educational reference reviewed").first()).toBeVisible();
 });
 
 test("case five preserves right submandibular identity, not-provided scout, and ultrasound/MRI recommendations", async ({ page }) => {

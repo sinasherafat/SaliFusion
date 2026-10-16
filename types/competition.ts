@@ -150,6 +150,8 @@ export interface CaseSession {
   selectedMediaSlot: string;
   comparisonMode: boolean;
   fusionGenerated: boolean;
+  fusionImpression: string;
+  fusionReviewed: boolean;
   clinicianObservations: Partial<Record<ClinicalModality, string>>;
 }
 

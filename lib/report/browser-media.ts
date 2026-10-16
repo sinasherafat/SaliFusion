@@ -3,7 +3,7 @@ import type { ReportMedia } from "@/lib/report/competition-pdf";
 import type { CaseSession, ClinicalModality, CompetitionCase, GlandExam, PhaseAsset, UploadedAsset } from "@/types/competition";
 
 const phaseOrder = ["precontrast", "ductal", "acinar", "evacuation"] as const;
-const phaseLabel = { precontrast: "Scout / precontrast", ductal: "Ductal filling", acinar: "Acinar / parenchymal filling", evacuation: "Evacuation · interval Not Documented" };
+const phaseLabel = { precontrast: "Scout / Precontrast", ductal: "Ductal Filling", acinar: "Acinar / Parenchymal Filling", evacuation: "Evacuation" };
 
 function loadImage(url: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -27,7 +27,7 @@ async function videoToJpeg(asset: UploadedAsset, label: string) {
   await new Promise<void>((resolve, reject) => { video.onloadedmetadata = () => resolve(); video.onerror = () => reject(new Error(`Unable to load ${asset.url}`)); video.load(); });
   const time = Number.isFinite(video.duration) ? Math.min(Math.max(video.duration / 2, 0), Math.max(video.duration - .05, 0)) : 0;
   if (time > 0) await new Promise<void>((resolve) => { video.onseeked = () => resolve(); video.currentTime = time; });
-  const canvas = document.createElement("canvas"); canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext("2d")?.drawImage(video, 0, 0); const media = await canvasJpeg(canvas, `${label} · representative frame ${time.toFixed(2)} s`); video.removeAttribute("src"); video.load(); return media;
+  const canvas = document.createElement("canvas"); canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext("2d")?.drawImage(video, 0, 0); const media = await canvasJpeg(canvas, label); video.removeAttribute("src"); video.load(); return media;
 }
 
 export async function collectReportMedia({ kind, demoCase, session, exam, includedModalities }: { kind: ClinicalModality | "fusion" | "complete"; demoCase: CompetitionCase; session: CaseSession; exam: GlandExam; includedModalities: ClinicalModality[] }) {
@@ -37,7 +37,8 @@ export async function collectReportMedia({ kind, demoCase, session, exam, includ
   if (includeUltrasound) {
     const slots = mediaSlotsForCase(demoCase.id); const slot = slots.find((item) => item.id === session.selectedMediaSlot) ?? slots[0]; const uploaded = exam.ultrasoundUploads[slot.id];
     const asset: UploadedAsset | undefined = uploaded ?? (slot.mediaUrl ? { id: slot.id, name: slot.id, url: slot.mediaUrl, kind: "video", objectUrl: false } : undefined);
-    if (asset) captures.push({ label: "ultrasound", run: () => asset.kind === "video" ? videoToJpeg(asset, slot.label) : imageToJpeg(asset, slot.label) });
+    const label = demoCase.id === "case-01" ? "Left Submandibular Gland - B-mode Ultrasound" : slot.label;
+    if (asset) captures.push({ label: "ultrasound", run: () => asset.kind === "video" ? videoToJpeg(asset, label) : imageToJpeg(asset, label) });
   }
   if (includeSialography) for (const phase of phaseOrder) { const asset = exam.phaseUploads[phase]; if (asset) captures.push({ label: phase, run: () => imageToJpeg(asset, phaseLabel[phase]) }); }
   const results = await Promise.all(captures.map(async (capture) => { try { return await capture.run(); } catch (error) { warnings.push(error instanceof Error ? error.message : `Unable to load ${capture.label}`); return undefined; } }));

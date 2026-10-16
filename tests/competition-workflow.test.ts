@@ -140,6 +140,6 @@ describe("fusion, provenance, and reports", () => {
     expect(text).toMatch(/SCOUT \/ PRECONTRAST/);
     expect(text).toMatch(/DUCTAL FILLING/);
     expect(text).toMatch(/ACINAR \/ PARENCHYMAL FILLING/);
-    expect(text).toMatch(/EVACUATION - Five minutes/);
+    expect(text).toMatch(/EVACUATION - FIVE MINUTES/);
   });
 });

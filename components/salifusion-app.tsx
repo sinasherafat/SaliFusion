@@ -1,18 +1,22 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { COMPETITION_CASES, getCompetitionCase } from "@/data/competition-cases";
 import { mediaSlotsForCase } from "@/data/demo-media";
 import { HistoryStep } from "@/components/competition/history-step";
 import { ImagingStep } from "@/components/competition/imaging-step";
-import { FinalReportStep, FusionStep, ModalityReportsStep } from "@/components/competition/report-steps";
+import { PdfPreviewDialog } from "@/components/competition/pdf-preview-dialog";
+import { FinalReportStep, FusionStep, ModalityReportsStep, type ReportActionState } from "@/components/competition/report-steps";
 import { createCompetitionPdf, type CompetitionReportInput } from "@/lib/report/competition-pdf";
 import { collectReportMedia } from "@/lib/report/browser-media";
 import type { CaseId, CaseSession, ClinicalModality, CompetitionCase, GlandExam, WorkflowStep } from "@/types/competition";
 import { WORKFLOW_STEPS } from "@/types/competition";
 
 type Screen = "landing" | "cases" | "workflow";
+type PdfPreview = { kind: CompetitionReportInput["kind"]; title: string; url: string; fileName: string; warnings: string[] };
+
+const caseOneFusionDraft = "Combined ultrasound and sialographic findings are consistent with left submandibular sialolithiasis associated with obstructive ductal abnormalities. Additional sialographic findings may indicate ductal stricturing, peripheral sialectasis, and chronic inflammatory ductal involvement, subject to confirmation on the supplied images.";
 
 function makeExam(demoCase: CompetitionCase, side: "left" | "right", suffix = "primary"): GlandExam {
   return { id: `${demoCase.id}-${side}-${suffix}`, gland: demoCase.history.gland, side, reviewed: {}, clinicianVerified: {}, ultrasoundUploads: {}, phaseUploads: {}, cbctImages: [], dicomSeries: [], selectedSeriesUid: "", dicomError: "" };
@@ -22,7 +26,7 @@ function createSession(demoCase: CompetitionCase): CaseSession {
   const primarySide = demoCase.history.laterality === "right" ? "right" : "left";
   const exams = [makeExam(demoCase, primarySide)];
   if (demoCase.history.laterality === "bilateral" || demoCase.id === "case-02") exams.push(makeExam(demoCase, primarySide === "left" ? "right" : "left", "comparison"));
-  return { history: structuredClone(demoCase.history), step: "history", exams, activeExamId: exams[0].id, activeModality: demoCase.id === "case-04" ? "sialography" : "ultrasound", selectedMediaSlot: mediaSlotsForCase(demoCase.id)[0].id, comparisonMode: false, fusionGenerated: false, clinicianObservations: {} };
+  return { history: structuredClone(demoCase.history), step: "history", exams, activeExamId: exams[0].id, activeModality: demoCase.id === "case-04" ? "sialography" : "ultrasound", selectedMediaSlot: mediaSlotsForCase(demoCase.id)[0].id, comparisonMode: false, fusionGenerated: false, fusionImpression: "", fusionReviewed: false, clinicianObservations: {} };
 }
 
 function initialSessions(): Record<CaseId, CaseSession> {
@@ -34,12 +38,18 @@ export function SaliFusionApp() {
   const [identity, setIdentity] = useState({ name: "Competition Reviewer", role: "Clinician / judge" });
   const [activeCaseId, setActiveCaseId] = useState<CaseId>("case-01");
   const [sessions, setSessions] = useState<Record<CaseId, CaseSession>>(initialSessions);
+  const [pdfPreview, setPdfPreview] = useState<PdfPreview | null>(null);
+  const [reportAction, setReportAction] = useState<ReportActionState>({ status: "idle" });
+  const previewUrlRef = useRef<string | null>(null);
+  const addedExamIndexRef = useRef(0);
   const demoCase = getCompetitionCase(activeCaseId)!;
   const session = sessions[activeCaseId];
   const exam = session.exams.find((item) => item.id === session.activeExamId) ?? session.exams[0];
   const stepIndex = WORKFLOW_STEPS.findIndex((item) => item.id === session.step);
 
-  const updateSession = (next: CaseSession) => setSessions((current) => ({ ...current, [activeCaseId]: next }));
+  useEffect(() => () => { if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current); }, []);
+  function closePreview() { if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current); previewUrlRef.current = null; setPdfPreview(null); }
+  const updateSession = (next: CaseSession) => { closePreview(); setReportAction({ status: "idle" }); setSessions((current) => ({ ...current, [activeCaseId]: next })); };
   const patchSession = (patch: Partial<CaseSession>) => updateSession({ ...session, ...patch });
   const updateExam = (next: GlandExam) => updateSession({ ...session, exams: session.exams.map((item) => item.id === next.id ? next : item) });
   function enterDemo(event: React.FormEvent) { event.preventDefault(); setScreen("cases"); }
@@ -47,10 +57,20 @@ export function SaliFusionApp() {
   function resetCase(caseId: CaseId) { const selected = getCompetitionCase(caseId)!; sessions[caseId].exams.forEach(revokeExam); setSessions((current) => ({ ...current, [caseId]: createSession(selected) })); }
   function goTo(step: WorkflowStep) { patchSession({ step }); }
   function move(direction: -1 | 1) { const nextIndex = Math.max(0, Math.min(WORKFLOW_STEPS.length - 1, stepIndex + direction)); goTo(WORKFLOW_STEPS[nextIndex].id); window.scrollTo({ top: 0, behavior: "smooth" }); }
-  function addExam() { const nextSide = exam.side === "left" ? "right" : "left"; const next = makeExam(demoCase, nextSide, `added-${Date.now()}`); updateSession({ ...session, exams: [...session.exams, next], activeExamId: next.id }); }
+  function addExam() { const nextSide = exam.side === "left" ? "right" : "left"; addedExamIndexRef.current += 1; const next = makeExam(demoCase, nextSide, `added-${addedExamIndexRef.current}`); updateSession({ ...session, exams: [...session.exams, next], activeExamId: next.id }); }
   function removeExam() { if (session.exams.length === 1 || !window.confirm(`Remove the ${exam.side} ${exam.gland} examination and its local uploads?`)) return; revokeExam(exam); const remaining = session.exams.filter((item) => item.id !== exam.id); updateSession({ ...session, exams: remaining, activeExamId: remaining[0].id, fusionGenerated: false }); }
   function openImaging(modality: ClinicalModality) { patchSession({ step: "imaging", activeModality: modality }); }
-  async function download(kind: CompetitionReportInput["kind"]) { const included = (["ultrasound", "sialography", "cbct"] as ClinicalModality[]).filter((modality) => exam.reviewed[modality]); const { media, warnings } = await collectReportMedia({ kind, demoCase, session, exam, includedModalities: included }); if (warnings.length) console.warn("Report media warnings", warnings); const bytes = createCompetitionPdf({ kind, demoCase, history: session.history, exam, includedModalities: included, scores: demoCase.scores, media }); const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer], { type: "application/pdf" })); const link = document.createElement("a"); link.href = url; link.download = `SaliFusion-${demoCase.id}-${kind}.pdf`; link.click(); globalThis.setTimeout(() => URL.revokeObjectURL(url), 1500); }
+  function reportTitle(kind: CompetitionReportInput["kind"]) { return kind === "ultrasound" ? "Ultrasound Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "fusion" ? "Fusion Report" : kind === "complete" ? "Complete Case Report" : "CBCT Report"; }
+  function reportFileName(kind: CompetitionReportInput["kind"]) { if (demoCase.id === "case-01") return `SaliFusion_Case01_${kind === "sialography" ? "Sialography" : kind === "complete" ? "Complete" : kind[0].toUpperCase() + kind.slice(1)}_Report.pdf`; return `SaliFusion_${demoCase.id}_${kind}_Report.pdf`; }
+  async function buildPdf(kind: CompetitionReportInput["kind"]) {
+    setReportAction({ kind, status: "generating", message: "Generating PDF..." });
+    const included = (["ultrasound", "sialography", "cbct"] as ClinicalModality[]).filter((modality) => exam.reviewed[modality]);
+    const { media, warnings } = await collectReportMedia({ kind, demoCase, session, exam, includedModalities: included });
+    const bytes = createCompetitionPdf({ kind, demoCase, history: session.history, exam, includedModalities: included, scores: demoCase.scores, media, fusionImpression: session.fusionImpression || (demoCase.id === "case-01" ? caseOneFusionDraft : demoCase.fusion.interpretation), fusionReviewed: session.fusionReviewed });
+    return { bytes, warnings };
+  }
+  async function previewPdf(kind: CompetitionReportInput["kind"]) { try { const { bytes, warnings } = await buildPdf(kind); closePreview(); const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer], { type: "application/pdf" })); previewUrlRef.current = url; setPdfPreview({ kind, title: reportTitle(kind), url, fileName: reportFileName(kind), warnings }); setReportAction({ kind, status: "preview-ready", message: "Preview Ready." }); } catch (error) { console.error("Unable to render PDF", error); setReportAction({ kind, status: "error", message: "Unable to render PDF." }); } }
+  async function downloadPdf(kind: CompetitionReportInput["kind"]) { try { const { bytes, warnings } = await buildPdf(kind); if (warnings.length) console.warn("Report media warnings", warnings); const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer], { type: "application/pdf" })); const link = document.createElement("a"); link.href = url; link.download = reportFileName(kind); link.click(); globalThis.setTimeout(() => URL.revokeObjectURL(url), 30_000); setReportAction({ kind, status: "download-ready", message: "Download Ready." }); } catch (error) { console.error("Unable to generate PDF", error); setReportAction({ kind, status: "error", message: "Unable to render PDF." }); } }
 
   if (screen === "landing") return <Landing identity={identity} onIdentity={setIdentity} onEnter={enterDemo} />;
   if (screen === "cases") return <CaseSelection sessions={sessions} identity={identity} onStart={startCase} onReset={resetCase} onHome={() => setScreen("landing")} />;
@@ -61,11 +81,12 @@ export function SaliFusionApp() {
     <main className="workflow-main">
       {session.step === "history" && <HistoryStep demoCase={demoCase} history={session.history} onChange={(history) => updateSession({ ...session, history, exams: session.exams.map((item, index) => index === 0 ? { ...item, gland: history.gland, side: history.laterality === "right" ? "right" : "left" } : item) })} />}
       {session.step === "imaging" && <ImagingStep demoCase={demoCase} session={session} exam={exam} onSession={updateSession} onExam={updateExam} onAddExam={addExam} onRemoveExam={removeExam} />}
-      {session.step === "reports" && <ModalityReportsStep demoCase={demoCase} exam={exam} onDownload={download} onOpenImaging={openImaging} />}
-      {session.step === "fusion" && <FusionStep demoCase={demoCase} session={session} exam={exam} onGenerate={() => patchSession({ fusionGenerated: true })} onDownload={() => download("fusion")} />}
-      {session.step === "final" && <FinalReportStep demoCase={demoCase} session={session} exam={exam} onDownload={download} />}
+      {session.step === "reports" && <ModalityReportsStep demoCase={demoCase} session={session} exam={exam} onPreview={previewPdf} onDownload={downloadPdf} onOpenImaging={openImaging} actionState={reportAction} />}
+      {session.step === "fusion" && <FusionStep demoCase={demoCase} session={session} exam={exam} onGenerate={() => patchSession({ fusionGenerated: true, fusionImpression: session.fusionImpression || (demoCase.id === "case-01" ? caseOneFusionDraft : demoCase.fusion.interpretation), fusionReviewed: false })} onImpressionChange={(fusionImpression) => patchSession({ fusionImpression, fusionReviewed: false })} onReviewed={() => patchSession({ fusionReviewed: true })} onPreview={previewPdf} onDownload={downloadPdf} actionState={reportAction} />}
+      {session.step === "final" && <FinalReportStep demoCase={demoCase} session={session} exam={exam} onPreview={previewPdf} onDownload={downloadPdf} actionState={reportAction} />}
     </main>
     <footer className="workflow-footer"><div>{stepIndex > 0 && <button className="back-button" onClick={() => move(-1)}>← Back</button>}</div><span>Case data is isolated in this browser session.</span><div>{stepIndex < WORKFLOW_STEPS.length - 1 ? <button className="continue-button" onClick={() => move(1)}>Continue to {WORKFLOW_STEPS[stepIndex + 1].label} →</button> : <button className="continue-button" onClick={() => setScreen("cases")}>Finish case</button>}</div></footer>
+    {pdfPreview && <PdfPreviewDialog title={pdfPreview.title} url={pdfPreview.url} fileName={pdfPreview.fileName} warnings={pdfPreview.warnings} onClose={closePreview} />}
   </div>;
 }
 
