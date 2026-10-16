@@ -121,6 +121,7 @@ export interface UploadedAsset {
   url: string;
   kind: "video" | "image";
   objectUrl: boolean;
+  storage?: "session" | "device";
 }
 
 export interface PhaseAsset {

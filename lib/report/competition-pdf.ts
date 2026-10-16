@@ -66,16 +66,17 @@ class Layout {
   labelValue(label: string, value: string) { this.ensure(28); this.page.commands.push(text(label.toUpperCase(), LEFT, this.y, 7.5, "F2", color.muted)); this.y -= 12; this.paragraph(value, { size: 9.3, gap: 7 }); }
 }
 
-function reportTitle(input: CompetitionReportInput) { if (input.demoCase.id === "case-02") return input.kind === "complete" ? "SaliFusion - Case 02 Final Imaging Report" : input.kind === "fusion" ? "Integrated Clinical and Ultrasound Assessment" : "Bilateral Parotid Ultrasound and Doppler Assessment"; const kind = input.kind; return kind === "complete" ? "Complete Case Report" : kind === "fusion" ? "Integrated Multimodal Fusion Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "cbct" ? "CBCT Report" : "Ultrasound Report"; }
+function reportTitle(input: CompetitionReportInput) { if (input.demoCase.id === "case-02") return input.kind === "complete" ? "Case 02 - Complete Imaging Report" : input.kind === "fusion" ? "Case 02 - Integrated Clinical and Ultrasound Assessment" : "Case 02 - Bilateral Parotid Ultrasound and Doppler Examination"; const kind = input.kind; return kind === "complete" ? "Complete Case Report" : kind === "fusion" ? "Integrated Multimodal Fusion Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "cbct" ? "CBCT Report" : "Ultrasound Report"; }
 function modalitiesFor(input: CompetitionReportInput) { return input.kind === "fusion" || input.kind === "complete" ? input.includedModalities : [input.kind as ClinicalModality]; }
 function modalityLabel(modality: ClinicalModality) { return modality === "sialography" ? "Four-Phase Sialography" : modality === "cbct" ? "CBCT" : "Ultrasound B-mode"; }
 function caseTwoHistory(history: HistoryAnswers) { const parts = [`${history.symptomDuration || "Duration not documented"} ${history.onset || "unknown-onset"} ${history.laterality} ${history.gland} swelling`, `pain ${history.pain}`, `erythema/local warmth ${history.rednessWarmth}`, `purulent discharge ${history.purulentDischarge}`, `xerostomia ${history.xerostomia}`, `xerophthalmia ${history.xerophthalmia}`, `fever ${history.fever}`]; return parts.join("; ") + "."; }
 
 function addOpening(layout: Layout, input: CompetitionReportInput) {
-  layout.page.commands.push(fillRect(LEFT, 694, RIGHT - LEFT, 70, color.tealSoft));
-  layout.page.commands.push(text("Clinical Imaging Assessment Report", LEFT + 18, 738, 20, "F2", color.ink));
-  layout.page.commands.push(text(reportTitle(input), LEFT + 18, 714, 11, "F1", color.teal));
-  layout.y = 670;
+  layout.page.commands.push(fillRect(LEFT, 682, RIGHT - LEFT, 82, color.tealSoft));
+  layout.page.commands.push(text("SaliFusion", LEFT + 18, 741, 20, "F2", color.ink));
+  layout.page.commands.push(text("AI-Assisted Salivary Gland Imaging and Diagnostic Decision Support", LEFT + 18, 725, 8.2, "F1", color.muted));
+  wrap(reportTitle(input), RIGHT - LEFT - 36, 10.2).slice(0, 2).forEach((row, index) => layout.page.commands.push(text(row, LEFT + 18, 705 - index * 12, 10.2, "F2", color.teal)));
+  layout.y = 660;
   layout.paragraph(`Case ${input.demoCase.number}`, { size: 12, font: "F2", color: color.teal, gap: 2 });
   layout.paragraph(input.demoCase.id === "case-02" ? "Acute Left Parotitis" : input.demoCase.id === "case-01" ? "Left Submandibular Sialolithiasis with Obstructive Ductal Disease" : input.demoCase.title, { size: 17, font: "F2", gap: 14 });
   const modalities = input.demoCase.id === "case-02" ? "B-mode + Doppler Imaging" : modalitiesFor(input).map(modalityLabel).join(", ");
@@ -104,6 +105,7 @@ function addCaseTwoUltrasound(layout: Layout, input: CompetitionReportInput) {
   layout.heading("Safety Assessment"); layout.paragraph(`${safety.title}. ${safety.explanation}`, { color: safety.state === "defer" ? color.amber : color.ink });
   layout.heading("Recommendations"); layout.list([...input.demoCase.ultrasound.recommendations, ...safety.considerations]);
   layout.heading("Examination Limitations"); layout.list(input.demoCase.ultrasound.limitations);
+  layout.heading("Final Impression"); layout.paragraph("Acute Left Parotitis / Acute Sialadenitis. Comparative B-mode and Doppler findings favor acute inflammatory involvement of the symptomatic left parotid gland. Definite bacterial infection and abscess are not established by this short video.", { size: 10.5, font: "F2" });
 }
 
 function addModality(layout: Layout, input: CompetitionReportInput, modality: ClinicalModality) {
@@ -201,7 +203,7 @@ function headerFooter(pageNumber: number, pageCount: number, input: CompetitionR
 export function createCompetitionPdf(input: CompetitionReportInput): Uint8Array {
   const layout = new Layout(); addOpening(layout, input);
   layout.heading("Relevant Clinical History"); layout.paragraph(input.demoCase.id === "case-02" ? caseTwoHistory(input.history) : input.demoCase.clinicalSummary);
-  if (input.demoCase.id === "case-02") { layout.heading("Data Provenance"); layout.paragraph("Clinical media were read from a browser-local object URL and embedded client-side. Curated educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
+  if (input.demoCase.id === "case-02") { layout.heading("Data Provenance"); layout.paragraph("Clinical media were read from a browser-local object URL, optionally restored from consented on-device IndexedDB storage, and embedded client-side. Curated educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
   const modalities = modalitiesFor(input);
   for (const modality of modalities) addModality(layout, input, modality);
   if (input.kind === "fusion" || input.kind === "complete") addFusion(layout, input);

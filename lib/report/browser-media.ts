@@ -22,11 +22,30 @@ async function imageToJpeg(asset: PhaseAsset | UploadedAsset, label: string) {
   const image = await loadImage(asset.url); const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight; canvas.getContext("2d")?.drawImage(image, 0, 0); return canvasJpeg(canvas, label);
 }
 
+async function waitForDecodedVideoFrame(video: HTMLVideoElement) {
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      video.pause();
+      resolve();
+    };
+    const timeout = window.setTimeout(finish, 1500);
+    const frameVideo = video as HTMLVideoElement & { requestVideoFrameCallback?: (callback: VideoFrameRequestCallback) => number };
+    if (frameVideo.requestVideoFrameCallback) frameVideo.requestVideoFrameCallback(() => finish());
+    else video.addEventListener("canplay", finish, { once: true });
+    void video.play().catch(finish);
+  });
+}
+
 async function videoFrameCanvas(asset: UploadedAsset) {
   const video = document.createElement("video"); video.muted = true; video.playsInline = true; video.preload = "auto"; video.src = asset.url;
   await new Promise<void>((resolve, reject) => { video.onloadedmetadata = () => resolve(); video.onerror = () => reject(new Error(`Unable to load ${asset.url}`)); video.load(); });
   const time = Number.isFinite(video.duration) ? Math.min(Math.max(video.duration / 2, 0), Math.max(video.duration - .05, 0)) : 0;
   if (time > 0) await new Promise<void>((resolve) => { video.onseeked = () => resolve(); video.currentTime = time; });
+  await waitForDecodedVideoFrame(video);
   const canvas = document.createElement("canvas"); canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext("2d")?.drawImage(video, 0, 0); video.removeAttribute("src"); video.load(); return canvas;
 }
 

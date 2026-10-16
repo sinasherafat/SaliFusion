@@ -162,10 +162,14 @@ test("case two uses one local composite video for four views, independent report
   await expect(page.getByLabel("Patient age")).toHaveValue("26");
   await expect(page.getByLabel("Laterality")).toHaveValue("left");
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
-  await expect(page.getByText("Import Case 2 Comparative Ultrasound Video")).toBeVisible();
-  await expect(page.getByLabel("Import Case 2 Comparative Ultrasound Video")).toHaveCount(1);
+  await expect(page.getByText("Case 2 — Bilateral Parotid Ultrasound Comparison")).toBeVisible();
+  await expect(page.getByLabel("Load Case 2 Video")).toHaveCount(1);
   const videoBytes = await syntheticVideo(page);
-  await page.getByLabel("Import Case 2 Comparative Ultrasound Video").setInputFiles({ name: "synthetic-four-panel.webm", mimeType: "video/webm;codecs=vp8", buffer: videoBytes });
+  await page.getByLabel("Remember this video on this device").check();
+  await page.getByLabel("Load Case 2 Video").setInputFiles({ name: "synthetic-four-panel.webm", mimeType: "video/webm;codecs=vp8", buffer: videoBytes });
+  await expect(page.getByText("Video loaded", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Stored only in this authorized browser/)).toBeVisible();
+  await page.getByLabel("Switch gland examination").selectOption({ index: 1 });
   const video = page.locator(".case-two-video-viewport video");
   await expect(video).toHaveAttribute("src", /^blob:/);
   await expect(page.getByRole("tab", { name: /Full Comparison/ })).toHaveAttribute("aria-selected", "true");
@@ -173,19 +177,25 @@ test("case two uses one local composite video for four views, independent report
   await expect(page.getByTestId("case-two-composite-stage")).toHaveClass(/region-lower-left/);
   await page.getByRole("tab", { name: /Right Doppler/ }).click();
   await expect(page.getByTestId("case-two-composite-stage")).toHaveClass(/region-upper-right/);
-  await page.getByRole("button", { name: "Play / Pause" }).click();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
   await expect.poll(() => video.evaluate((node: HTMLVideoElement) => node.currentTime)).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(page.getByLabel("Case 2 video timeline")).toBeEnabled();
   await page.getByRole("button", { name: "Review educational reference findings" }).click();
   await expect(page.getByRole("heading", { name: "Right Parotid — Reference Examination" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Left Parotid — Symptomatic Gland" })).toBeVisible();
   await expect(page.getByText(/Sjögren-related salivary gland changes/)).toBeVisible();
+  await page.getByRole("button", { name: "Confirm clinician review" }).click();
   await page.getByRole("tab", { name: /2D Sialography/ }).click();
   await expect(page.getByText(/Defer During the Acute Inflammatory Episode/).first()).toBeVisible();
   await expect(page.getByText(/Previously acquired images may still be reviewed/)).toBeVisible();
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
   const report = page.locator(".case-two-ultrasound-report");
-  await expect(report.getByRole("heading", { name: "Bilateral Parotid Ultrasound and Doppler Assessment" })).toBeVisible();
+  await expect(report.getByRole("heading", { name: "Bilateral Parotid Ultrasound and Doppler Report" })).toBeVisible();
+  await expect(report.getByRole("button", { name: "View Report", exact: true })).toBeVisible();
+  await expect(report.getByRole("button", { name: "View PDF", exact: true })).toBeEnabled();
+  await expect(report.getByRole("button", { name: "Download PDF", exact: true })).toBeEnabled();
+  await expect(report.getByText("Patient History Summary")).toBeVisible();
   await expect(report.getByText("Right Parotid B-mode Findings")).toBeVisible();
   await expect(report.getByText("Left Doppler Findings")).toBeVisible();
 
@@ -193,18 +203,37 @@ test("case two uses one local composite video for four views, independent report
     await page.getByRole("button", { name: buttonName, exact: true }).click(); const dialog = page.getByRole("dialog", { name: dialogName }); await expect(dialog).toBeVisible(); await expect(dialog.locator(".pdf-page-stack canvas").first()).toBeVisible(); const source = await dialog.locator(".pdf-page-stack").getAttribute("data-pdf-url"); const pdf = await page.evaluate(async (url) => new TextDecoder("windows-1252").decode(await (await fetch(url!)).arrayBuffer()), source); expect(pdf).toContain("%PDF-1.4"); expect((pdf.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(5); expect(pdf).toContain("/MediaBox [0 0 595.28 841.89]"); if (expectedText) expect(pdf).toContain(expectedText); await dialog.getByRole("button", { name: "Close PDF preview" }).click();
   }
   async function archiveDownload(buttonName: string) { if (!process.env.PDF_QA_DIR) return; const pending = page.waitForEvent("download"); await page.getByRole("button", { name: buttonName, exact: true }).click(); const download = await pending; const path = await download.path(); expect(path).toBeTruthy(); await mkdir(process.env.PDF_QA_DIR, { recursive: true }); await copyFile(path!, join(process.env.PDF_QA_DIR, download.suggestedFilename())); }
-  await inspectPdf("View PDF", "Bilateral Parotid Ultrasound and Doppler Assessment");
+  await inspectPdf("View PDF", "Case 02 — Bilateral Parotid Ultrasound and Doppler Examination");
   await archiveDownload("Download PDF");
   await page.getByRole("button", { name: /Continue to Fusion/ }).click();
   await page.getByRole("button", { name: "Generate Integrated Assessment" }).click();
   await expect(page.getByRole("heading", { name: "Integrated Clinical and Ultrasound Assessment" })).toBeVisible();
-  await page.getByRole("button", { name: "Modify Impression" }).click(); const edited = "Clinician-reviewed Case 2 impression retained in browser-generated reports."; await page.getByLabel("Final imaging impression").fill(edited); await page.getByRole("button", { name: "Mark as Reviewed" }).click();
-  await inspectPdf("View Integrated Assessment PDF", "Integrated Clinical-Ultrasound Assessment", edited);
-  await archiveDownload("Download Integrated Assessment PDF");
+  await page.getByRole("button", { name: "Modify Impression" }).click(); const edited = "Clinician-reviewed Case 2 impression retained in browser-generated reports."; await page.getByLabel("Final imaging impression").fill(edited); await page.getByRole("button", { name: "Mark Reviewed" }).click();
+  await inspectPdf("View Integrated PDF", "Integrated Clinical and Ultrasound Assessment", edited);
+  await archiveDownload("Download Integrated PDF");
   await page.getByRole("button", { name: /Continue to Final Report/ }).click();
-  await expect(page.getByRole("heading", { name: "SaliFusion — Case 02 Final Imaging Report" })).toBeVisible();
-  await inspectPdf("View Complete Case PDF", "SaliFusion — Case 02 Final Imaging Report", edited);
+  await expect(page.getByRole("heading", { name: "Case 02 Complete Imaging Report" }).first()).toBeVisible();
+  await inspectPdf("View Complete Case PDF", "Case 02 Complete Imaging Report", edited);
   await archiveDownload("Download Complete Case PDF");
+  expect(writes).toEqual([]);
+});
+
+test("case two restores an explicitly consented video from browser-local storage after refresh", async ({ page }) => {
+  const writes: string[] = []; page.on("request", (request) => { if (["POST", "PUT", "PATCH"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`); });
+  await enterDemo(page);
+  await page.locator(".case-card").nth(1).getByRole("button", { name: /Start Case/ }).click();
+  await page.getByRole("button", { name: /Continue to Imaging/ }).click();
+  const videoBytes = await syntheticVideo(page);
+  await page.getByLabel("Remember this video on this device").check();
+  await page.getByLabel("Load Case 2 Video").setInputFiles({ name: "persistent-synthetic-four-panel.webm", mimeType: "video/webm;codecs=vp8", buffer: videoBytes });
+  await expect(page.getByText(/Stored only in this authorized browser/)).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: /Enter Clinical Demo/ }).click();
+  await page.locator(".case-card").nth(1).getByRole("button", { name: /Start Case/ }).click();
+  await page.getByRole("button", { name: /Continue to Imaging/ }).click();
+  await expect(page.getByText("persistent-synthetic-four-panel.webm")).toBeVisible();
+  await expect(page.getByText("Video loaded", { exact: true })).toBeVisible();
+  await expect(page.locator(".case-two-video-viewport video")).toHaveAttribute("src", /^blob:/);
   expect(writes).toEqual([]);
 });
 
