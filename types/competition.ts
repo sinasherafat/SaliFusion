@@ -118,13 +118,13 @@ export interface UploadedAsset {
   name: string;
   url: string;
   kind: "video" | "image";
-  objectUrl: true;
+  objectUrl: boolean;
 }
 
 export interface PhaseAsset {
   name: string;
   url: string;
-  objectUrl: true;
+  objectUrl: boolean;
 }
 
 export interface GlandExam {

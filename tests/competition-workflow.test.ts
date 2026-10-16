@@ -33,7 +33,7 @@ describe("five-case competition fixture", () => {
     expect(DEMO_MEDIA_SLOTS.filter((slot) => slot.caseId === "case-02")).toHaveLength(4);
     expect(DEMO_MEDIA_SLOTS.some((slot) => slot.id === "case-04-provisional-left-submandibular-ultrasound")).toBe(true);
     expect(DEMO_MEDIA_SLOTS.some((slot) => slot.id === "case-05-right-submandibular-ultrasound")).toBe(true);
-    expect(DEMO_MEDIA_SLOTS.every((slot) => slot.status === "awaiting-upload")).toBe(true);
+    expect(DEMO_MEDIA_SLOTS.every((slot) => slot.status === "awaiting-upload" && slot.mediaUrl === undefined)).toBe(true);
   });
 });
 
@@ -42,12 +42,11 @@ describe("independent four-phase sialography source of truth", () => {
     for (const item of COMPETITION_CASES) expect(Object.keys(item.sialographyPhases)).toEqual(phaseIds);
   });
 
-  it("configures Case 1 radiopaque scout, separate stenosis/dilatation, peripheral disease, and incomplete evacuation", () => {
+  it("keeps Case 1 educational references separate and records an undocumented evacuation interval", () => {
     const item = byId("case-01");
-    expect(item.sialographyPhases.precontrast.findings.join(" ")).toMatch(/radiopaque calculus/i);
-    expect(item.sialographyPhases.ductal.findings.join(" ")).toMatch(/dilatation.*stricture/i);
-    expect(item.sialographyPhases.acinar.findings.join(" ")).toMatch(/peripheral sialectasis.*pruned-tree/i);
-    expect(item.sialographyPhases.evacuation.findings.join(" ")).toMatch(/incomplete.*persistent.*delayed/i);
+    expect(item.sialography.observedFindings.every((finding) => finding.startsWith("Preset educational reference:"))).toBe(true);
+    expect(item.sialographyPhases.evacuation.timing).toBe("Not Documented");
+    expect(item.sialographyPhases.evacuation.interpretation).toMatch(/Delayed clearance cannot be concluded/i);
   });
 
   it("preserves Case 2 B-mode/Doppler comparison and records that sialography was not performed", () => {
