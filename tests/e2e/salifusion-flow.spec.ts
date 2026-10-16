@@ -85,9 +85,9 @@ test("case one browser-local media and image-bearing reports remain connected wi
     const dialog = page.getByRole("dialog", { name: title });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("Preview Ready")).toBeVisible();
-    const frame = dialog.getByTitle(`${title} PDF preview`);
-    await expect(frame).toHaveAttribute("src", /^blob:/);
-    const source = await frame.getAttribute("src");
+    const pages = dialog.locator(".pdf-page-stack");
+    await expect(pages.locator("canvas").first()).toBeVisible();
+    const source = await pages.getAttribute("data-pdf-url");
     const result = await page.evaluate(async (url) => {
       const bytes = new Uint8Array(await (await fetch(url!)).arrayBuffer());
       return { size: bytes.length, signature: new TextDecoder("windows-1252").decode(bytes.slice(0, 8)) };
@@ -138,7 +138,9 @@ test("case one browser-local media and image-bearing reports remain connected wi
   await page.getByRole("button", { name: "View Fusion PDF" }).click();
   const fusionDialog = page.getByRole("dialog", { name: "Fusion Report" });
   await expect(fusionDialog).toBeVisible();
-  const fusionSource = await fusionDialog.getByTitle("Fusion Report PDF preview").getAttribute("src");
+  await expect(fusionDialog.getByText("Preview Ready")).toBeVisible();
+  await expect(fusionDialog.locator(".pdf-page-stack canvas").first()).toBeVisible();
+  const fusionSource = await fusionDialog.locator(".pdf-page-stack").getAttribute("data-pdf-url");
   const fusionPdfText = await page.evaluate(async (url) => new TextDecoder("windows-1252").decode(await (await fetch(url!)).arrayBuffer()), fusionSource);
   expect(fusionPdfText).toContain(editedImpression);
   await fusionDialog.getByRole("button", { name: "Close PDF preview" }).click();
