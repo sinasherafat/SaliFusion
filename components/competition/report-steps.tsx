@@ -47,7 +47,7 @@ function CaseOneModalityReports({ demoCase, session, exam, onPreview, onDownload
           <ReportSection title="Observed findings" items={demoCase.ultrasound.observedFindings} />
           <ReportSection title="Imaging interpretation" text={demoCase.ultrasound.interpretation} />
           <ReportSection title="Differential diagnoses" items={demoCase.ultrasound.differentials.map((item) => `${item.label}: ${item.rationale}`)} />
-          <ReportSection title="Limitations" items={demoCase.ultrasound.limitations} />
+          <ReportSection title="Limitations" items={demoCase.ultrasound.limitations.map((item) => ultrasoundAsset && item.includes("awaiting user-supplied media") ? "Browser-local ultrasound media are available; educational reference findings remain unverified until direct clinician assessment." : item)} />
           <ReportSection title="Recommendations" items={demoCase.ultrasound.recommendations} />
         </div>}
         <ReportControlRow kind="ultrasound" available={ultrasoundReady} viewOpen={openReport === "ultrasound"} onView={() => setOpenReport(openReport === "ultrasound" ? null : "ultrasound")} onPreview={onPreview} onDownload={onDownload} />

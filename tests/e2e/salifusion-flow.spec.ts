@@ -119,6 +119,8 @@ test("case one browser-local media and image-bearing reports remain connected wi
   await expect(page.getByRole("heading", { name: "Modality Reports" })).toBeVisible();
   const ultrasoundReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Ultrasound Report" }) });
   const sialographyReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Four-Phase Sialography Report" }) });
+  await expect(ultrasoundReport).toContainText("Browser-local ultrasound media are available");
+  await expect(ultrasoundReport).not.toContainText("awaiting user-supplied media");
   await expect(sialographyReport.locator(".phase-thumbnail-row img")).toHaveCount(4);
   await expect(page.getByText("No CBCT study provided")).toBeVisible();
   await previewPdf(ultrasoundReport, "Ultrasound Report");

@@ -99,7 +99,10 @@ function addModality(layout: Layout, input: CompetitionReportInput, modality: Cl
   }
   layout.heading("Imaging Interpretation"); layout.paragraph(fixture.interpretation, { size: 10.2, font: "F2" });
   layout.heading("Differential Diagnoses"); layout.list(fixture.differentials.map((item) => `${item.label}: ${item.rationale}${item.opposingEvidence ? ` Opposing evidence: ${item.opposingEvidence}` : ""}`));
-  layout.heading("Limitations"); layout.list(fixture.limitations);
+  const limitations = modality === "ultrasound" && Object.keys(input.exam.ultrasoundUploads).length
+    ? fixture.limitations.map((item) => item.includes("awaiting user-supplied media") ? "Browser-local ultrasound media are available; educational reference findings remain unverified until direct clinician assessment." : item)
+    : fixture.limitations;
+  layout.heading("Limitations"); layout.list(limitations);
   layout.heading("Recommendations"); layout.list(fixture.recommendations);
 }
 
