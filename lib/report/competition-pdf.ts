@@ -21,6 +21,24 @@ function fixtureFor(input: CompetitionReportInput, modality: ClinicalModality) {
   return input.demoCase[modality];
 }
 
+function sialographyRows(input: CompetitionReportInput) {
+  const supplied = Object.keys(input.exam.phaseUploads);
+  return [
+    "CLINICAL INDICATION", input.demoCase.clinicalSummary,
+    "TECHNIQUE AND AVAILABLE PHASES", supplied.length ? `User-supplied phase images: ${supplied.join(", ")}.` : "No phase images supplied. Educational scenario findings await image verification.",
+    ...Object.values(input.demoCase.sialographyPhases).flatMap((phase) => [
+      `${phase.label.toUpperCase()}${phase.timing ? ` - ${phase.timing}` : ""}`,
+      ...(phase.findings.length ? phase.findings.map((item) => `- ${item}`) : ["- No phase finding is asserted."]),
+      `Phase interpretation: ${phase.interpretation}`,
+      ...phase.limitations.map((item) => `Phase limitation: ${item}`),
+    ]),
+    "OVERALL IMPRESSION", input.demoCase.sialography.interpretation,
+    "DIFFERENTIAL DIAGNOSES", ...input.demoCase.sialography.differentials.map((item) => `- ${item.label}: ${item.rationale}`),
+    "CLINICAL RECOMMENDATIONS", ...input.demoCase.sialography.recommendations.map((item) => `- ${item}`),
+    "STUDY LIMITATIONS", ...input.demoCase.sialography.limitations.map((item) => `- ${item}`), "",
+  ];
+}
+
 export function createCompetitionPdf(input: CompetitionReportInput): Uint8Array {
   const title = input.kind === "complete" ? "Complete Case Report" : input.kind === "fusion" ? "Multimodal Fusion Report" : `${input.kind === "sialography" ? "2D Sialography" : input.kind === "cbct" ? "3D CBCT" : "Ultrasound"} Report`;
   const modalities = input.kind === "complete" || input.kind === "fusion" ? input.includedModalities : [input.kind as ClinicalModality];
@@ -34,6 +52,7 @@ export function createCompetitionPdf(input: CompetitionReportInput): Uint8Array 
     `Clinical summary: ${input.demoCase.clinicalSummary}`,
     "",
     ...modalities.flatMap((modality) => {
+      if (modality === "sialography") return sialographyRows(input);
       const fixture = fixtureFor(input, modality);
       return [
         `${modality.toUpperCase()} - OBSERVED FINDINGS`,

@@ -12,7 +12,7 @@ export interface DuctalRecommendation {
 export function getDuctalRecommendation(caseId: CaseId, history: HistoryAnswers): DuctalRecommendation {
   const acuteInflammatory = history.onset === "sudden" && history.pain === "yes" && (history.rednessWarmth === "yes" || history.fever === "yes");
   const suppurative = history.purulentDischarge === "yes" || history.acuteSuppurativeConcern === "yes";
-  if (caseId === "case-02" || acuteInflammatory || suppurative) {
+  if (acuteInflammatory || suppurative) {
     return {
       state: "defer",
       title: "Contrast Sialography: Not Appropriate at This Stage — Clinical Assessment Required",
@@ -39,6 +39,13 @@ export function getDuctalRecommendation(caseId: CaseId, history: HistoryAnswers)
       state: "precaution", title: "Selective ductal assessment only",
       explanation: "Sialography is not obligatory after minimally abnormal ultrasound. Consider it only for a specific unresolved ductal question when safe and likely to influence management.",
       considerations: ["Assess both parotid glands and both submandibular glands when a complete ultrasound survey is indicated.", "Clinical and laboratory criteria remain central."],
+    };
+  }
+  if (caseId === "case-05" && history.palpableMass === "yes") {
+    return {
+      state: "precaution", title: "Ductal study suggests mass effect — characterize the lesion",
+      explanation: "Sialography may demonstrate displacement or regional underfilling but cannot determine lesion histology. Targeted ultrasound and MRI are the priority recommendations.",
+      considerations: ["Targeted right submandibular ultrasound with Color/Power Doppler.", "MRI with and without contrast when clinically appropriate.", "Tissue sampling is determined by the treating team."],
     };
   }
   return {

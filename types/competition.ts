@@ -1,6 +1,6 @@
 import type { DicomSeries } from "@/types/salifusion";
 
-export type CaseId = "case-01" | "case-02" | "case-03";
+export type CaseId = "case-01" | "case-02" | "case-03" | "case-04" | "case-05";
 export type WorkflowStep = "history" | "imaging" | "reports" | "fusion" | "final";
 export type ClinicalModality = "ultrasound" | "sialography" | "cbct";
 export type TriState = "yes" | "no" | "unknown";
@@ -79,6 +79,16 @@ export interface ModalityFixture {
   recommendations: string[];
 }
 
+export interface SialographyPhaseFixture {
+  phase: SialographyPhase;
+  label: string;
+  availability: "awaiting-image" | "not-provided";
+  findings: string[];
+  interpretation: string;
+  timing?: string;
+  limitations: string[];
+}
+
 export interface ScoreFixture {
   label: string;
   score: number;
@@ -90,12 +100,14 @@ export interface CompetitionCase {
   number: string;
   title: string;
   shortTitle: string;
+  badge: string;
   objective: string;
   accent: string;
   history: HistoryAnswers;
   clinicalSummary: string;
   ultrasound: ModalityFixture;
   sialography: ModalityFixture;
+  sialographyPhases: Record<SialographyPhase, SialographyPhaseFixture>;
   cbct: ModalityFixture;
   fusion: ModalityFixture;
   scores: ScoreFixture[];
