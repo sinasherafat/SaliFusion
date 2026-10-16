@@ -30,7 +30,9 @@ describe("five-case competition fixture", () => {
   it("preserves the original six media slots and adds optional Case 4 and required Case 5 imports", () => {
     const original = ["case-01-left-submandibular-bmode", "case-02-left-parotid-bmode-abnormal", "case-02-right-parotid-bmode-normal", "case-02-left-parotid-doppler-abnormal", "case-02-right-parotid-doppler-normal", "case-03-left-parotid-bmode"];
     expect(original.every((id) => DEMO_MEDIA_SLOTS.some((slot) => slot.id === id))).toBe(true);
-    expect(DEMO_MEDIA_SLOTS.filter((slot) => slot.caseId === "case-02")).toHaveLength(4);
+    expect(DEMO_MEDIA_SLOTS.filter((slot) => slot.caseId === "case-02")).toHaveLength(5);
+    expect(DEMO_MEDIA_SLOTS.find((slot) => slot.id === "case-02-bilateral-parotid-composite-ultrasound")).toMatchObject({ composite: true, sourceRegion: "full", mode: "doppler" });
+    expect(DEMO_MEDIA_SLOTS.filter((slot) => slot.caseId === "case-02" && !slot.composite).map((slot) => slot.sourceRegion).sort()).toEqual(["lower-left", "lower-right", "upper-left", "upper-right"]);
     expect(DEMO_MEDIA_SLOTS.some((slot) => slot.id === "case-04-provisional-left-submandibular-ultrasound")).toBe(true);
     expect(DEMO_MEDIA_SLOTS.some((slot) => slot.id === "case-05-right-submandibular-ultrasound")).toBe(true);
     expect(DEMO_MEDIA_SLOTS.every((slot) => slot.status === "awaiting-upload" && slot.mediaUrl === undefined)).toBe(true);
@@ -51,7 +53,7 @@ describe("independent four-phase sialography source of truth", () => {
 
   it("preserves Case 2 B-mode/Doppler comparison and records that sialography was not performed", () => {
     const item = byId("case-02");
-    expect(item.ultrasound.observedFindings.join(" ")).toMatch(/hypoechoic.*hypervascularity.*right parotid/i);
+    expect(item.ultrasound.observedFindings.join(" ")).toMatch(/hypoechoic.*right doppler.*left doppler.*contralateral right gland/i);
     expect(Object.values(item.sialographyPhases).every((phase) => phase.availability === "not-provided")).toBe(true);
   });
 
@@ -141,5 +143,16 @@ describe("fusion, provenance, and reports", () => {
     expect(text).toMatch(/DUCTAL FILLING/);
     expect(text).toMatch(/ACINAR \/ PARENCHYMAL FILLING/);
     expect(text).toMatch(/EVACUATION - FIVE MINUTES/);
+  });
+
+  it("creates a Case 2 clinical-ultrasound report without inventing sialography fusion", () => {
+    const demoCase = byId("case-02"); const exam = { ...emptyExam(), reviewed: { ultrasound: true } };
+    const bytes = createCompetitionPdf({ kind: "fusion", demoCase, history: demoCase.history, exam, includedModalities: ["ultrasound"], fusionImpression: "Clinician-edited acute left parotitis impression." });
+    const text = new TextDecoder().decode(bytes);
+    expect(text).toContain("Integrated Clinical and Ultrasound Assessment");
+    expect(text).toContain("Clinician-edited acute left parotitis impression.");
+    expect(text).toContain("This is not ultrasound-sialography fusion");
+    expect(text).toContain("Contrast Sialography - Defer During the Acute Inflammatory Episode");
+    expect(text).not.toContain("Cross-Modal Concordance");
   });
 });

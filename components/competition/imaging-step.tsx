@@ -65,23 +65,90 @@ function GlandBar({ session, exam, onSession, onExam, onAddExam, onRemoveExam }:
 }
 
 function UltrasoundWorkspace({ demoCase, session, exam, onSession, onExam }: { demoCase: CompetitionCase; session: CaseSession; exam: GlandExam; onSession: (session: CaseSession) => void; onExam: (exam: GlandExam) => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null); const [speed, setSpeed] = useState("1");
+  if (demoCase.id === "case-02") return <CaseTwoUltrasoundWorkspace demoCase={demoCase} exam={exam} onExam={onExam} />;
   const slots = mediaSlotsForCase(demoCase.id); const selected = slots.find((item) => item.id === session.selectedMediaSlot) ?? slots[0];
   const uploaded = exam.ultrasoundUploads[selected.id];
   const mediaAsset: UploadedAsset | undefined = uploaded ?? (selected.mediaUrl ? { id: selected.id, name: selected.id, url: selected.mediaUrl, kind: "video", objectUrl: false } : undefined);
-  const videoRef = useRef<HTMLVideoElement>(null); const [speed, setSpeed] = useState("1");
-  const canCompare = demoCase.id === "case-02"; const compareSlot = canCompare ? slots.find((item) => item.mode === selected.mode && item.side !== selected.side) : undefined; const compareAsset = compareSlot ? exam.ultrasoundUploads[compareSlot.id] ?? (compareSlot.mediaUrl ? { id: compareSlot.id, name: compareSlot.id, url: compareSlot.mediaUrl, kind: "video" as const, objectUrl: false } : undefined) : undefined;
   function importMedia(file: File | undefined, kind: UploadedAsset["kind"]) { if (!file) return; const old = exam.ultrasoundUploads[selected.id]; if (old?.objectUrl) URL.revokeObjectURL(old.url); onExam({ ...exam, ultrasoundUploads: { ...exam.ultrasoundUploads, [selected.id]: { id: selected.id, name: file.name, url: URL.createObjectURL(file), kind, objectUrl: true } }, reviewed: { ...exam.reviewed, ultrasound: false }, clinicianVerified: { ...exam.clinicianVerified, ultrasound: false } }); }
   function captureFrame() { const video = videoRef.current; if (!video?.videoWidth) return; const canvas = document.createElement("canvas"); canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext("2d")?.drawImage(video, 0, 0); const link = document.createElement("a"); link.href = canvas.toDataURL("image/png"); link.download = `${selected.id}-frame.png`; link.click(); }
-  const mismatch = selected.gland !== exam.gland || (selected.side !== exam.side && !(demoCase.id === "case-02" && selected.side === "right"));
-  return <div className="modality-workspace"><div className="viewer-column"><div className="scan-header"><span><i /> Prerecorded Educational Ultrasound Replay</span><div>{selected.side} {selected.gland} · {selected.mode === "bmode" ? "B-mode" : "Color Doppler"}</div></div><div className={`ultrasound-stage ${session.comparisonMode ? "compare" : ""}`}>
+  const mismatch = selected.gland !== exam.gland || selected.side !== exam.side;
+  return <div className="modality-workspace"><div className="viewer-column"><div className="scan-header"><span><i /> Prerecorded Educational Ultrasound Replay</span><div>{selected.side} {selected.gland} · {selected.mode === "bmode" ? "B-mode" : "Doppler Imaging"}</div></div><div className="ultrasound-stage">
     <MediaPane asset={mediaAsset} slotLabel={selected.label} videoRef={videoRef} speed={Number(speed)} />
-    {session.comparisonMode && compareSlot && <MediaPane asset={compareAsset} slotLabel={compareSlot.label} speed={Number(speed)} />}
-  </div><div className="playback-bar"><button onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()} disabled={!mediaAsset || mediaAsset.kind !== "video"}>Play / Pause</button><button onClick={() => { if (videoRef.current) { videoRef.current.currentTime = 0; void videoRef.current.play(); } }} disabled={!mediaAsset || mediaAsset.kind !== "video"}>Replay</button><button onClick={captureFrame} disabled={!mediaAsset || mediaAsset.kind !== "video"}>Capture frame</button><button onClick={() => void videoRef.current?.requestFullscreen()} disabled={!mediaAsset}>Enlarge</button><label>Speed<select aria-label="Playback speed" value={speed} onChange={(event) => { setSpeed(event.target.value); if (videoRef.current) videoRef.current.playbackRate = Number(event.target.value); }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>{canCompare && <button className={session.comparisonMode ? "active" : ""} onClick={() => onSession({ ...session, comparisonMode: !session.comparisonMode })}>{session.comparisonMode ? "Single view" : "Side-by-side comparison"}</button>}</div>
+  </div><div className="playback-bar"><button onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()} disabled={!mediaAsset || mediaAsset.kind !== "video"}>Play / Pause</button><button onClick={() => { if (videoRef.current) { videoRef.current.currentTime = 0; void videoRef.current.play(); } }} disabled={!mediaAsset || mediaAsset.kind !== "video"}>Replay</button><button onClick={captureFrame} disabled={!mediaAsset || mediaAsset.kind !== "video"}>Capture frame</button><button onClick={() => void videoRef.current?.requestFullscreen()} disabled={!mediaAsset}>Enlarge</button><label>Speed<select aria-label="Playback speed" value={speed} onChange={(event) => { setSpeed(event.target.value); if (videoRef.current) videoRef.current.playbackRate = Number(event.target.value); }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
     {mismatch && <div className="inline-warning amber">Media metadata does not match the active {exam.side} {exam.gland} examination. Confirm identity before reporting.</div>}
     <div className="slot-selector"><div><span>Demo clip</span><select aria-label="Select demo clip" value={selected.id} onChange={(event) => onSession({ ...session, selectedMediaSlot: event.target.value, comparisonMode: false })}>{slots.map((slot) => <option key={slot.id} value={slot.id}>{slot.label}</option>)}</select></div><label className="upload-button">Upload video<input aria-label="Upload ultrasound video" hidden type="file" accept="video/*,.mov" onChange={(event) => importMedia(event.target.files?.[0], "video")} /></label><label className="upload-button secondary">Upload image<input aria-label="Upload ultrasound image" hidden type="file" accept="image/png,image/jpeg" onChange={(event) => importMedia(event.target.files?.[0], "image")} /></label>{uploaded && <button className="text-button" onClick={() => { if (uploaded.objectUrl) URL.revokeObjectURL(uploaded.url); const next = { ...exam.ultrasoundUploads }; delete next[selected.id]; onExam({ ...exam, ultrasoundUploads: next, reviewed: { ...exam.reviewed, ultrasound: false } }); }}>Remove local file</button>}</div>
     <p className="media-note">Slot ID: <code>{selected.id}</code>. Selected files remain in browser memory for this tab only and retain their original aspect ratio.</p>
   </div><AnalysisPanel title="Ultrasound educational analysis" demoCase={demoCase} modality="ultrasound" verified={Boolean(exam.clinicianVerified.ultrasound)} reviewed={Boolean(exam.reviewed.ultrasound)} onReview={() => onExam({ ...exam, reviewed: { ...exam.reviewed, ultrasound: true } })} onVerify={() => onExam({ ...exam, clinicianVerified: { ...exam.clinicianVerified, ultrasound: true }, reviewed: { ...exam.reviewed, ultrasound: true } })} />
   </div>;
+}
+
+type CaseTwoView = "full" | "right-bmode" | "left-bmode" | "right-doppler" | "left-doppler";
+const caseTwoCompositeId = "case-02-bilateral-parotid-composite-ultrasound";
+const caseTwoLegacyIds = ["case-02-left-parotid-bmode-abnormal", "case-02-right-parotid-bmode-normal", "case-02-left-parotid-doppler-abnormal", "case-02-right-parotid-doppler-normal"];
+const caseTwoViews: { id: CaseTwoView; label: string; detail: string; region: "full" | "upper-left" | "upper-right" | "lower-left" | "lower-right" }[] = [
+  { id: "full", label: "Full Comparison", detail: "Original four-panel source", region: "full" },
+  { id: "right-bmode", label: "Right B-mode", detail: "Reference gland", region: "upper-left" },
+  { id: "left-bmode", label: "Left B-mode", detail: "Symptomatic gland", region: "lower-left" },
+  { id: "right-doppler", label: "Right Doppler", detail: "Reference Doppler Imaging", region: "upper-right" },
+  { id: "left-doppler", label: "Left Doppler", detail: "Symptomatic Doppler Imaging", region: "lower-right" },
+];
+
+function CaseTwoUltrasoundWorkspace({ demoCase, exam, onExam }: { demoCase: CompetitionCase; exam: GlandExam; onExam: (exam: GlandExam) => void }) {
+  const asset = exam.ultrasoundUploads[caseTwoCompositeId];
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<CaseTwoView>("full");
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [speed, setSpeed] = useState("1");
+  const activeView = caseTwoViews.find((item) => item.id === view)!;
+
+  function loadComposite(file?: File) {
+    if (!file) return;
+    if (asset?.objectUrl) URL.revokeObjectURL(asset.url);
+    const url = URL.createObjectURL(file);
+    const sharedAsset: UploadedAsset = { id: caseTwoCompositeId, name: file.name, url, kind: "video", objectUrl: true };
+    const ultrasoundUploads: GlandExam["ultrasoundUploads"] = { ...exam.ultrasoundUploads, [caseTwoCompositeId]: sharedAsset };
+    for (const id of caseTwoLegacyIds) ultrasoundUploads[id] = { ...sharedAsset, id };
+    onExam({ ...exam, ultrasoundUploads, reviewed: { ...exam.reviewed, ultrasound: false }, clinicianVerified: { ...exam.clinicianVerified, ultrasound: false } });
+  }
+
+  function removeComposite() {
+    if (asset?.objectUrl) URL.revokeObjectURL(asset.url);
+    const ultrasoundUploads = { ...exam.ultrasoundUploads };
+    delete ultrasoundUploads[caseTwoCompositeId];
+    for (const id of caseTwoLegacyIds) delete ultrasoundUploads[id];
+    onExam({ ...exam, ultrasoundUploads, reviewed: { ...exam.reviewed, ultrasound: false }, clinicianVerified: { ...exam.clinicianVerified, ultrasound: false } });
+  }
+
+  function captureFrame() {
+    const video = videoRef.current;
+    if (!video?.videoWidth) return;
+    const halfWidth = Math.floor(video.videoWidth / 2); const halfHeight = Math.floor(video.videoHeight / 2);
+    const coordinates: Record<Exclude<typeof activeView.region, "full">, [number, number]> = { "upper-left": [0, 0], "upper-right": [halfWidth, 0], "lower-left": [0, halfHeight], "lower-right": [halfWidth, halfHeight] };
+    const canvas = document.createElement("canvas");
+    if (activeView.region === "full") { canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext("2d")?.drawImage(video, 0, 0); }
+    else { const [x, y] = coordinates[activeView.region]; canvas.width = halfWidth; canvas.height = halfHeight; canvas.getContext("2d")?.drawImage(video, x, y, halfWidth, halfHeight, 0, 0, halfWidth, halfHeight); }
+    const link = document.createElement("a"); link.href = canvas.toDataURL("image/png"); link.download = `case-02-${view}-representative-frame.png`; link.click();
+  }
+
+  return <div className="modality-workspace case-two-ultrasound"><div className="viewer-column">
+    <section className="case-two-local-loader" aria-label="Case 2 browser-local media import"><div><span>Private composite review</span><h2>Import Case 2 Comparative Ultrasound Video</h2><p>Choose the single original four-panel MOV. One browser-local source supplies all four mapped views and is never sent to a server, remote API, cloud storage, or analytics service.</p></div><label className={asset ? "loaded" : ""}><strong>{asset?.name || "Choose the composite MOV"}</strong><input type="file" accept="video/*,.mov" aria-label="Import Case 2 Comparative Ultrasound Video" onChange={(event) => loadComposite(event.target.files?.[0])} /></label>{asset && <button className="text-button" onClick={removeComposite}>Remove local video</button>}<small>{asset ? "Composite video ready for this browser session." : "Video not loaded."} Reloading the page clears this browser-local asset and requires re-import.</small></section>
+    <div className="case-two-info-bar"><b>Case 02 | Bilateral Parotid Comparison | B-mode + Doppler</b><span>Right: Reference Gland</span><span>Left: Symptomatic Gland</span></div>
+    <div className="case-two-view-tabs" role="tablist" aria-label="Composite ultrasound panel navigation">{caseTwoViews.map((item) => <button key={item.id} role="tab" aria-selected={view === item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><b>{item.label}</b><small>{item.detail}</small></button>)}</div>
+    <div ref={stageRef} className={`case-two-composite-stage region-${activeView.region}`} data-testid="case-two-composite-stage">
+      <div className="scan-header"><span><i /> Prerecorded Educational Ultrasound Replay</span><div>{activeView.label} · extracted from the same original composite video</div></div>
+      {asset ? <div className="case-two-video-viewport"><video ref={videoRef} src={asset.url} controls={view === "full"} playsInline preload="metadata" onLoadedMetadata={(event) => { setDuration(event.currentTarget.duration || 0); event.currentTarget.playbackRate = Number(speed); }} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} /></div> : <div className="empty-media"><div className="scan-lines" /><span>Composite ultrasound video awaiting local import</span><small>Expected source: one simultaneous four-panel recording</small></div>}
+    </div>
+    <div className="playback-bar case-two-playback"><button onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()} disabled={!asset}>Play / Pause</button><button onClick={() => { if (videoRef.current) { videoRef.current.currentTime = 0; void videoRef.current.play(); } }} disabled={!asset}>Replay</button><label className="case-two-timeline"><span>Frame navigation</span><input aria-label="Case 2 video timeline" type="range" min="0" max={duration || 0} step="0.01" value={Math.min(currentTime, duration || 0)} disabled={!asset} onChange={(event) => { const time = Number(event.target.value); setCurrentTime(time); if (videoRef.current) videoRef.current.currentTime = time; }} /></label><button onClick={captureFrame} disabled={!asset}>Capture representative frame</button><button onClick={() => void stageRef.current?.requestFullscreen()} disabled={!asset}>Enlarge</button><label>Speed<select aria-label="Playback speed" value={speed} onChange={(event) => { setSpeed(event.target.value); if (videoRef.current) videoRef.current.playbackRate = Number(event.target.value); }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
+    <div className="case-two-panel-map" aria-label="Case 2 quadrant mapping"><article><span>Upper-left</span><b>Right Parotid — B-mode</b><p>Relatively homogeneous reference parenchyma.</p></article><article><span>Upper-right</span><b>Right Parotid — Doppler Imaging</b><p>Comparatively less conspicuous vascular signal.</p></article><article><span>Lower-left</span><b>Left Parotid — B-mode</b><p>Rounded hypoechoic areas and heterogeneous appearance.</p></article><article><span>Lower-right</span><b>Left Parotid — Doppler Imaging</b><p>More conspicuous vascular signals than the right gland.</p></article></div>
+    <p className="media-note">All panel views are crops of <code>{caseTwoCompositeId}</code>. No anatomy, echogenicity, contrast, vascular signal, or laterality is altered. The exact Color versus Power Doppler technique is not asserted.</p>
+  </div><CaseTwoAnalysisPanel demoCase={demoCase} reviewed={Boolean(exam.reviewed.ultrasound)} verified={Boolean(exam.clinicianVerified.ultrasound)} onReview={() => onExam({ ...exam, reviewed: { ...exam.reviewed, ultrasound: true } })} onVerify={() => onExam({ ...exam, reviewed: { ...exam.reviewed, ultrasound: true }, clinicianVerified: { ...exam.clinicianVerified, ultrasound: true } })} /></div>;
+}
+
+function CaseTwoAnalysisPanel({ demoCase, reviewed, verified, onReview, onVerify }: { demoCase: CompetitionCase; reviewed: boolean; verified: boolean; onReview: () => void; onVerify: () => void }) {
+  return <aside className="analysis-panel case-two-analysis"><span className="analysis-eyebrow">Curated educational comparison</span><h2>Bilateral parotid assessment</h2><div className={`provenance ${verified ? "verified" : "pending"}`}><strong>{verified ? "Clinician-reviewed educational scenario" : "Imported media observations require clinician verification"}</strong><p>No live scanner connection or automated image inference is claimed.</p></div>{reviewed ? <><section><h3>Right Parotid — Reference Examination</h3><p>Relatively homogeneous parenchymal echotexture without the conspicuous multifocal hypoechoic changes seen in the left gland. The short clip does not establish whole-gland normality.</p></section><section><h3>Left Parotid — Symptomatic Gland</h3><p>Multiple relatively uniform rounded hypoechoic areas produce a heterogeneous, pomegranate-like appearance. This pattern is nonspecific.</p></section><section><h3>Right Parotid — Doppler Reference</h3><p>Detectable but comparatively less prominent Doppler vascular signal than the symptomatic left gland.</p></section><section><h3>Left Parotid — Doppler Assessment</h3><p>Increased Doppler vascular signals relative to the right gland support active hyperemia in the appropriate clinical context; Doppler alone does not establish infection.</p></section><section><h3>Integrated Ultrasound Assessment</h3><p>{demoCase.ultrasound.interpretation}</p></section><section><h3>Differential diagnosis</h3>{demoCase.ultrasound.differentials.map((item, index) => <div className="differential" key={item.label}><b>{index + 1}. {item.label}</b><p>{item.rationale}</p>{item.opposingEvidence && <small>Opposing evidence: {item.opposingEvidence}</small>}</div>)}</section><ResultSection title="Limitations" items={demoCase.ultrasound.limitations} /><button className="review-button" onClick={onVerify}>{verified ? "Reviewed for this examination" : "Confirm clinician review"}</button></> : <button className="analysis-action" onClick={onReview}>Review educational reference findings</button>}</aside>;
 }
 
 function MediaPane({ asset, slotLabel, videoRef, speed = 1 }: { asset?: UploadedAsset; slotLabel: string; videoRef?: React.RefObject<HTMLVideoElement | null>; speed?: number }) {

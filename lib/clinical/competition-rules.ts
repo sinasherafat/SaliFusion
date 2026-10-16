@@ -15,8 +15,8 @@ export function getDuctalRecommendation(caseId: CaseId, history: HistoryAnswers)
   if (acuteInflammatory || suppurative) {
     return {
       state: "defer",
-      title: "Contrast Sialography: Not Appropriate at This Stage — Clinical Assessment Required",
-      explanation: "Acute painful glandular inflammation requires evaluation before retrograde contrast sialography. Defer the procedure when acute suppurative infection is suspected or confirmed.",
+      title: "Contrast Sialography — Defer During the Acute Inflammatory Episode",
+      explanation: "Retrograde contrast sialography is not recommended during suspected active acute infectious or suppurative salivary inflammation without appropriate clinical assessment. Further management should prioritize clinical evaluation and appropriate ultrasound-based assessment.",
       considerations: ["Previously acquired images may still be reviewed.", "Other indicated imaging, including non-sialographic CT, remains available.", "Reassess the ductal question after the acute episode resolves."],
     };
   }

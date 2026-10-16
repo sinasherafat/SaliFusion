@@ -1,4 +1,5 @@
 import { SCORE_DISCLAIMER } from "@/data/diagnostic-scores";
+import { getDuctalRecommendation } from "@/lib/clinical/competition-rules";
 import type { ClinicalModality, CompetitionCase, GlandExam, HistoryAnswers, ScoreFixture, SialographyPhase } from "@/types/competition";
 
 export interface ReportMedia {
@@ -34,7 +35,7 @@ const BOTTOM = 62;
 const phaseOrder: SialographyPhase[] = ["precontrast", "ductal", "acinar", "evacuation"];
 const color = { ink: "0.10 0.16 0.18", muted: "0.36 0.43 0.44", teal: "0.04 0.43 0.40", tealSoft: "0.91 0.97 0.96", line: "0.83 0.87 0.87", amber: "0.55 0.36 0.10", white: "1 1 1" };
 
-function safe(value: string) { return value.normalize("NFKD").replace(/[\u2010-\u2015]/g, "-").replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim().replace(/[()\\]/g, "\\$&"); }
+function safe(value: string) { return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[\u2010-\u2015]/g, "-").replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim().replace(/[()\\]/g, "\\$&"); }
 function concat(parts: Uint8Array[]) { const output = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0)); let offset = 0; for (const part of parts) { output.set(part, offset); offset += part.length; } return output; }
 function streamObject(dictionary: string, stream: Uint8Array) { return concat([encoder.encode(`<< ${dictionary} /Length ${stream.length} >>\nstream\n`), stream, encoder.encode("\nendstream")]); }
 function text(value: string, x: number, y: number, size = 9.5, font: FontName = "F1", fill = color.ink) { return `BT /${font} ${size} Tf ${fill} rg 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${safe(value)}) Tj ET`; }
@@ -55,7 +56,7 @@ class Layout {
   newPage() { this.page = { commands: [], images: [] }; this.pages.push(this.page); this.y = TOP; }
   ensure(height: number) { if (this.y - height < BOTTOM) this.newPage(); }
   space(height = 8) { this.y -= height; }
-  heading(value: string) { this.ensure(34); this.page.commands.push(text(value.toUpperCase(), LEFT, this.y, 9, "F2", color.teal), line(LEFT, this.y - 7, RIGHT, this.y - 7)); this.y -= 22; }
+  heading(value: string) { this.ensure(60); this.page.commands.push(text(value.toUpperCase(), LEFT, this.y, 9, "F2", color.teal), line(LEFT, this.y - 7, RIGHT, this.y - 7)); this.y -= 22; }
   paragraph(value: string, options: { size?: number; font?: FontName; color?: string; indent?: number; gap?: number } = {}) {
     const size = options.size ?? 9.5; const font = options.font ?? "F1"; const fill = options.color ?? color.ink; const indent = options.indent ?? 0; const leading = size * 1.45; const rows = wrap(value, RIGHT - LEFT - indent, size); this.ensure(rows.length * leading + 4);
     for (const row of rows) { this.page.commands.push(text(row, LEFT + indent, this.y, size, font, fill)); this.y -= leading; }
@@ -65,20 +66,21 @@ class Layout {
   labelValue(label: string, value: string) { this.ensure(28); this.page.commands.push(text(label.toUpperCase(), LEFT, this.y, 7.5, "F2", color.muted)); this.y -= 12; this.paragraph(value, { size: 9.3, gap: 7 }); }
 }
 
-function reportTitle(kind: CompetitionReportInput["kind"]) { return kind === "complete" ? "Complete Case Report" : kind === "fusion" ? "Integrated Multimodal Fusion Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "cbct" ? "CBCT Report" : "Ultrasound Report"; }
+function reportTitle(input: CompetitionReportInput) { if (input.demoCase.id === "case-02") return input.kind === "complete" ? "SaliFusion - Case 02 Final Imaging Report" : input.kind === "fusion" ? "Integrated Clinical and Ultrasound Assessment" : "Bilateral Parotid Ultrasound and Doppler Assessment"; const kind = input.kind; return kind === "complete" ? "Complete Case Report" : kind === "fusion" ? "Integrated Multimodal Fusion Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "cbct" ? "CBCT Report" : "Ultrasound Report"; }
 function modalitiesFor(input: CompetitionReportInput) { return input.kind === "fusion" || input.kind === "complete" ? input.includedModalities : [input.kind as ClinicalModality]; }
 function modalityLabel(modality: ClinicalModality) { return modality === "sialography" ? "Four-Phase Sialography" : modality === "cbct" ? "CBCT" : "Ultrasound B-mode"; }
+function caseTwoHistory(history: HistoryAnswers) { const parts = [`${history.symptomDuration || "Duration not documented"} ${history.onset || "unknown-onset"} ${history.laterality} ${history.gland} swelling`, `pain ${history.pain}`, `erythema/local warmth ${history.rednessWarmth}`, `purulent discharge ${history.purulentDischarge}`, `xerostomia ${history.xerostomia}`, `xerophthalmia ${history.xerophthalmia}`, `fever ${history.fever}`]; return parts.join("; ") + "."; }
 
 function addOpening(layout: Layout, input: CompetitionReportInput) {
   layout.page.commands.push(fillRect(LEFT, 694, RIGHT - LEFT, 70, color.tealSoft));
   layout.page.commands.push(text("Clinical Imaging Assessment Report", LEFT + 18, 738, 20, "F2", color.ink));
-  layout.page.commands.push(text(reportTitle(input.kind), LEFT + 18, 714, 11, "F1", color.teal));
+  layout.page.commands.push(text(reportTitle(input), LEFT + 18, 714, 11, "F1", color.teal));
   layout.y = 670;
   layout.paragraph(`Case ${input.demoCase.number}`, { size: 12, font: "F2", color: color.teal, gap: 2 });
-  layout.paragraph("Left Submandibular Sialolithiasis with Obstructive Ductal Disease", { size: 17, font: "F2", gap: 14 });
-  const modalities = modalitiesFor(input).map(modalityLabel).join(", ");
+  layout.paragraph(input.demoCase.id === "case-02" ? "Acute Left Parotitis" : input.demoCase.id === "case-01" ? "Left Submandibular Sialolithiasis with Obstructive Ductal Disease" : input.demoCase.title, { size: 17, font: "F2", gap: 14 });
+  const modalities = input.demoCase.id === "case-02" ? "B-mode + Doppler Imaging" : modalitiesFor(input).map(modalityLabel).join(", ");
   const fields = [
-    ["Demo case identifier", `Case ${input.demoCase.number}`], ["Affected gland", `${input.exam.side} ${input.exam.gland}`],
+    ["Demo case identifier", `Case ${input.demoCase.number}`], ["Affected gland", input.demoCase.id === "case-02" ? "Bilateral parotid comparison; symptomatic left gland" : `${input.exam.side} ${input.exam.gland}`],
     ["Examination modalities", modalities || "No reviewed modality"], ["Report generation date", new Date().toISOString().slice(0, 10)],
     ["Review status", input.fusionReviewed ? "Clinician reviewed educational draft" : "Educational draft - clinician review required"], ["Use status", "Educational / research demonstration"],
   ];
@@ -87,7 +89,25 @@ function addOpening(layout: Layout, input: CompetitionReportInput) {
   layout.y -= 162;
 }
 
+function addCaseTwoUltrasound(layout: Layout, input: CompetitionReportInput) {
+  const safety = getDuctalRecommendation(input.demoCase.id, input.history);
+  layout.heading("Clinical Indication"); layout.paragraph("Acute left parotid swelling, pain, and erythema. Comparative bilateral parotid B-mode and Doppler Imaging assessment.");
+  layout.heading("Relevant History"); layout.paragraph(caseTwoHistory(input.history));
+  layout.heading("Technique"); layout.paragraph("One prerecorded four-panel composite ultrasound video was reviewed. Upper-left: right parotid B-mode. Upper-right: right parotid Doppler Imaging. Lower-left: left parotid B-mode. Lower-right: left parotid Doppler Imaging. The exact Color versus Power Doppler technique is not asserted without reliable metadata. This is not ultrasound-sialography fusion.");
+  layout.heading("Right Parotid - B-mode"); layout.paragraph("The right parotid gland demonstrates relatively homogeneous parenchymal echotexture within the provided images, without the conspicuous multifocal hypoechoic changes observed in the contralateral gland.");
+  layout.heading("Left Parotid - B-mode"); layout.paragraph("The left parotid gland demonstrates multiple relatively uniform rounded hypoechoic areas distributed within the parenchyma, producing a heterogeneous, pomegranate-like sonographic appearance. This descriptive pattern is nonspecific.");
+  layout.heading("Right Parotid - Doppler Imaging"); layout.paragraph("The right parotid gland demonstrates comparatively less prominent Doppler vascular signal than the symptomatic left gland in the supplied examination.");
+  layout.heading("Left Parotid - Doppler Imaging"); layout.paragraph("The symptomatic left parotid gland demonstrates increased Doppler vascular signals relative to the contralateral reference gland, supporting active glandular hyperemia in the appropriate clinical context. Doppler alone does not establish infection.");
+  layout.heading("Comparison Findings"); layout.list(input.demoCase.ultrasound.observedFindings);
+  layout.heading("Integrated Ultrasound Impression"); layout.paragraph(input.demoCase.ultrasound.interpretation, { size: 10.2, font: "F2" });
+  layout.heading("Differential Diagnoses"); layout.list(input.demoCase.ultrasound.differentials.map((item) => `${item.label}: ${item.rationale}${item.opposingEvidence ? ` Opposing evidence: ${item.opposingEvidence}` : ""}`));
+  layout.heading("Safety Assessment"); layout.paragraph(`${safety.title}. ${safety.explanation}`, { color: safety.state === "defer" ? color.amber : color.ink });
+  layout.heading("Recommendations"); layout.list([...input.demoCase.ultrasound.recommendations, ...safety.considerations]);
+  layout.heading("Examination Limitations"); layout.list(input.demoCase.ultrasound.limitations);
+}
+
 function addModality(layout: Layout, input: CompetitionReportInput, modality: ClinicalModality) {
+  if (input.demoCase.id === "case-02" && modality === "ultrasound") { addCaseTwoUltrasound(layout, input); return; }
   const fixture = input.demoCase[modality];
   layout.heading(modality === "sialography" ? "Four-Phase Sialography Assessment" : `${modalityLabel(modality)} Assessment`);
   layout.labelValue("Evidence status", input.exam.clinicianVerified[modality] ? "Clinician-confirmed observation" : "Curated educational reference reviewed against browser-local media; direct clinician confirmation remains required.");
@@ -107,6 +127,17 @@ function addModality(layout: Layout, input: CompetitionReportInput, modality: Cl
 }
 
 function addFusion(layout: Layout, input: CompetitionReportInput) {
+  if (input.demoCase.id === "case-02") {
+    const safety = getDuctalRecommendation(input.demoCase.id, input.history); const impression = input.fusionImpression || input.demoCase.fusion.interpretation;
+    layout.heading("Integrated Clinical and Ultrasound Assessment"); layout.labelValue("Clinical context", caseTwoHistory(input.history));
+    layout.heading("Morphological Observations"); layout.list(["Left parotid heterogeneity with multiple rounded hypoechoic areas", "Comparatively preserved right-gland morphology within the demonstrated field"]);
+    layout.heading("Vascular Observations"); layout.list(["More prominent Doppler vascular signals in the symptomatic left parotid", "Less conspicuous Doppler vascularity in the contralateral reference gland", "No quantitative vascularity or perfusion index is inferred"]);
+    layout.heading("Final Imaging Impression"); layout.paragraph(impression, { size: 11, font: "F2" });
+    layout.heading("Differential Diagnoses"); layout.list(input.demoCase.ultrasound.differentials.map((item) => `${item.label}: ${item.rationale}${item.opposingEvidence ? ` Opposing evidence: ${item.opposingEvidence}` : ""}`));
+    layout.heading("Abscess Assessment"); layout.paragraph("No definite drainable collection is established from the supplied short comparison video. Targeted examination is recommended if clinical concern persists.");
+    layout.heading("Contrast Sialography Safety Decision"); layout.paragraph(`${safety.title}. ${safety.explanation}`, { color: safety.state === "defer" ? color.amber : color.ink }); layout.list(safety.considerations);
+    return;
+  }
   const impression = input.fusionImpression || input.demoCase.fusion.interpretation;
   layout.heading("Integrated Multimodal Assessment");
   layout.labelValue("Clinical history", input.demoCase.clinicalSummary);
@@ -123,6 +154,13 @@ function addFusion(layout: Layout, input: CompetitionReportInput) {
 
 function findingForMedia(input: CompetitionReportInput, label: string) {
   const normalized = label.toLowerCase();
+  if (input.demoCase.id === "case-02") {
+    if (normalized.includes("full four-panel")) return "Original composite frame retained to show the simultaneous bilateral B-mode and Doppler comparison.";
+    if (normalized.includes("right parotid") && normalized.includes("b-mode")) return "Relatively homogeneous reference-gland echotexture without the conspicuous multifocal hypoechoic pattern observed on the left.";
+    if (normalized.includes("left parotid") && normalized.includes("b-mode")) return "Multiple rounded hypoechoic areas with heterogeneous, pomegranate-like parenchymal appearance.";
+    if (normalized.includes("right parotid") && normalized.includes("doppler")) return "Comparatively less conspicuous Doppler vascular signal.";
+    return "Increased Doppler vascular signals relative to the contralateral right gland.";
+  }
   if (normalized.includes("ultrasound")) return input.demoCase.ultrasound.interpretation;
   const phase = normalized.includes("scout") ? "precontrast" : normalized.includes("ductal") ? "ductal" : normalized.includes("acinar") ? "acinar" : "evacuation";
   return input.demoCase.sialographyPhases[phase].interpretation;
@@ -132,36 +170,42 @@ function placeMedia(page: PdfPage, media: ReportMedia, top: number, maxHeight: n
   const maxWidth = RIGHT - LEFT - 24; const scale = Math.min(maxWidth / Math.max(media.width, 1), maxHeight / Math.max(media.height, 1)); const width = media.width * scale; const height = media.height * scale; const x = (PAGE_WIDTH - width) / 2; const y = top - height;
   page.commands.push(text(media.label, LEFT, top + 18, 10, "F2", color.ink), strokeRect(x - 3, y - 3, width + 6, height + 6));
   page.images.push({ media, x, y, width, height, resourceName });
-  const findingRows = wrap(`Phase-specific assessment: ${finding}`, RIGHT - LEFT, 8.2).slice(0, 3); findingRows.forEach((row, index) => page.commands.push(text(row, LEFT, y - 18 - index * 10.5, 8.2, "F1", color.muted)));
+  const findingRows = wrap(`Image-linked assessment: ${finding}`, RIGHT - LEFT, 8.2).slice(0, 3); findingRows.forEach((row, index) => page.commands.push(text(row, LEFT, y - 18 - index * 10.5, 8.2, "F1", color.muted)));
 }
 
 function addMediaPages(layout: Layout, input: CompetitionReportInput) {
   const media = input.media ?? [];
   if (!media.length) { layout.heading("Media Documentation"); layout.paragraph("Missing image: no browser-local reportable media were available when this PDF was generated. Re-import the source files and regenerate the report.", { color: color.amber }); return; }
+  if (input.demoCase.id === "case-02") {
+    const [composite, ...views] = media; layout.newPage(); layout.page.commands.push(text("Original Composite Ultrasound Frame", LEFT, 760, 13, "F2", color.teal)); placeMedia(layout.page, composite, 710, 500, "Im1", findingForMedia(input, composite.label));
+    for (let index = 0; index < views.length; index += 2) { layout.newPage(); layout.page.commands.push(text("Source-Quadrant Comparison Views", LEFT, 760, 13, "F2", color.teal)); views.slice(index, index + 2).forEach((item, pairIndex) => placeMedia(layout.page, item, pairIndex === 0 ? 700 : 365, 245, `Im${pairIndex + 1}`, findingForMedia(input, item.label))); } return;
+  }
   const ultrasound = media.filter((item) => item.label.toLowerCase().includes("ultrasound")); const phases = media.filter((item) => !item.label.toLowerCase().includes("ultrasound"));
   for (const item of ultrasound) { layout.newPage(); layout.page.commands.push(text("Representative Ultrasound Frame", LEFT, 760, 13, "F2", color.teal)); placeMedia(layout.page, item, 710, 520, "Im1", findingForMedia(input, item.label)); }
   for (let index = 0; index < phases.length; index += 2) { layout.newPage(); layout.page.commands.push(text("Four-Phase Sialography Image Review", LEFT, 760, 13, "F2", color.teal)); const pair = phases.slice(index, index + 2); pair.forEach((item, pairIndex) => placeMedia(layout.page, item, pairIndex === 0 ? 700 : 365, 245, `Im${pairIndex + 1}`, findingForMedia(input, item.label))); }
 }
 
 function headerFooter(pageNumber: number, pageCount: number, input: CompetitionReportInput) {
+  const footerTitle = input.demoCase.id === "case-02" ? input.kind === "ultrasound" ? "Bilateral Parotid US Report" : input.kind === "fusion" ? "Integrated Clinical-US Report" : "Case 02 Complete Report" : reportTitle(input).slice(0, 34);
   return [
     text("SaliFusion", LEFT, 814, 13, "F2", color.teal),
     text("AI-Assisted Salivary Gland Imaging and Diagnostic Decision Support", LEFT + 77, 814, 7.8, "F1", color.muted),
     line(LEFT, 801, RIGHT, 801, color.teal, 1),
     line(LEFT, 42, RIGHT, 42),
     text("Educational Research Demonstration - Not Clinically Validated", LEFT, 25, 7.5, "F1", color.muted),
-    text(`Case ${input.demoCase.number}  |  ${reportTitle(input.kind)}`, 300, 25, 7.5, "F1", color.muted),
+    text(`Case ${input.demoCase.number}  |  ${footerTitle}`, 300, 25, 7.5, "F1", color.muted),
     text(`Page ${pageNumber} of ${pageCount}`, 505, 25, 7.5, "F2", color.ink),
   ];
 }
 
 export function createCompetitionPdf(input: CompetitionReportInput): Uint8Array {
   const layout = new Layout(); addOpening(layout, input);
-  layout.heading("Relevant Clinical History"); layout.paragraph(input.demoCase.clinicalSummary);
+  layout.heading("Relevant Clinical History"); layout.paragraph(input.demoCase.id === "case-02" ? caseTwoHistory(input.history) : input.demoCase.clinicalSummary);
+  if (input.demoCase.id === "case-02") { layout.heading("Data Provenance"); layout.paragraph("Clinical media were read from a browser-local object URL and embedded client-side. Curated educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
   const modalities = modalitiesFor(input);
   for (const modality of modalities) addModality(layout, input, modality);
   if (input.kind === "fusion" || input.kind === "complete") addFusion(layout, input);
-  layout.heading("Data Provenance"); layout.paragraph("Clinical media were read from browser-local object URLs and embedded client-side. Preset educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted });
+  if (input.demoCase.id !== "case-02") { layout.heading("Data Provenance"); layout.paragraph("Clinical media were read from browser-local object URLs and embedded client-side. Preset educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
   addMediaPages(layout, input);
 
   let nextId = 6;

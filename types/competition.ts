@@ -6,7 +6,7 @@ export type ClinicalModality = "ultrasound" | "sialography" | "cbct";
 export type TriState = "yes" | "no" | "unknown";
 export type Gland = "parotid" | "submandibular" | "sublingual" | "other";
 export type Side = "left" | "right";
-export type UltrasoundMode = "bmode" | "color-doppler" | "power-doppler";
+export type UltrasoundMode = "bmode" | "doppler" | "color-doppler" | "power-doppler";
 export type SialographyPhase = "precontrast" | "ductal" | "acinar" | "evacuation";
 
 export interface HistoryAnswers {
@@ -60,6 +60,8 @@ export interface DemoMediaSlot {
   gland: "parotid" | "submandibular";
   side: Side;
   mode: UltrasoundMode;
+  composite?: boolean;
+  sourceRegion?: "full" | "upper-left" | "upper-right" | "lower-left" | "lower-right";
   label: string;
   mediaUrl?: string;
   status: "ready" | "awaiting-upload";

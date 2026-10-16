@@ -40,8 +40,9 @@ export function PdfPreviewDialog({ title, url, fileName, warnings, onClose }: { 
         }
         if (!cancelled) setRenderState("ready");
       } catch (error) {
+        if (cancelled || (error instanceof Error && error.name === "RenderingCancelledException")) return;
         console.error("Unable to render PDF preview", error);
-        if (!cancelled) setRenderState("error");
+        setRenderState("error");
       }
     })();
     return () => { cancelled = true; void loadingTask?.destroy(); host.replaceChildren(); };
