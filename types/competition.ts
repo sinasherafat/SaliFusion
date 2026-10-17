@@ -122,12 +122,17 @@ export interface UploadedAsset {
   kind: "video" | "image";
   objectUrl: boolean;
   storage?: "session" | "device";
+  type?: string;
+  lastModified?: number;
 }
 
 export interface PhaseAsset {
   name: string;
   url: string;
   objectUrl: boolean;
+  storage?: "session" | "device";
+  type?: string;
+  lastModified?: number;
 }
 
 export interface GlandExam {

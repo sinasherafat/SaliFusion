@@ -19,6 +19,7 @@ export interface CompetitionReportInput {
   media?: ReportMedia[];
   fusionImpression?: string;
   fusionReviewed?: boolean;
+  reportReviewed?: boolean;
 }
 
 type FontName = "F1" | "F2" | "F3";
@@ -80,10 +81,11 @@ function addOpening(layout: Layout, input: CompetitionReportInput) {
   layout.paragraph(`Case ${input.demoCase.number}`, { size: 12, font: "F2", color: color.teal, gap: 2 });
   layout.paragraph(input.demoCase.id === "case-02" ? "Acute Left Parotitis" : input.demoCase.id === "case-01" ? "Left Submandibular Sialolithiasis with Obstructive Ductal Disease" : input.demoCase.title, { size: 17, font: "F2", gap: 14 });
   const modalities = input.demoCase.id === "case-02" ? "B-mode + Doppler Imaging" : modalitiesFor(input).map(modalityLabel).join(", ");
+  const reviewStatus = input.reportReviewed ? "Clinician reviewed educational report" : input.media?.length ? "Educational draft - not yet clinician reviewed" : "Educational draft - image verification has not occurred";
   const fields = [
     ["Demo case identifier", `Case ${input.demoCase.number}`], ["Affected gland", input.demoCase.id === "case-02" ? "Bilateral parotid comparison; symptomatic left gland" : `${input.exam.side} ${input.exam.gland}`],
     ["Examination modalities", modalities || "No reviewed modality"], ["Report generation date", new Date().toISOString().slice(0, 10)],
-    ["Review status", input.fusionReviewed ? "Clinician reviewed educational draft" : "Educational draft - clinician review required"], ["Use status", "Educational / research demonstration"],
+    ["Review status", reviewStatus], ["Use status", "Educational / research demonstration"],
   ];
   const columnWidth = (RIGHT - LEFT - 12) / 2;
   fields.forEach(([label, value], index) => { const column = index % 2; const row = Math.floor(index / 2); const x = LEFT + column * (columnWidth + 12); const y = layout.y - row * 50; layout.page.commands.push(strokeRect(x, y - 36, columnWidth, 42), text(label.toUpperCase(), x + 10, y - 13, 7, "F2", color.muted)); const valueRows = wrap(value, columnWidth - 20, 8.5).slice(0, 2); valueRows.forEach((entry, rowIndex) => layout.page.commands.push(text(entry, x + 10, y - 26 - rowIndex * 10, 8.5, "F1", color.ink))); });
@@ -207,7 +209,7 @@ export function createCompetitionPdf(input: CompetitionReportInput): Uint8Array 
   const modalities = modalitiesFor(input);
   for (const modality of modalities) addModality(layout, input, modality);
   if (input.kind === "fusion" || input.kind === "complete") addFusion(layout, input);
-  if (input.demoCase.id !== "case-02") { layout.heading("Data Provenance"); layout.paragraph("Clinical media were read from browser-local object URLs and embedded client-side. Preset educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
+  if (input.demoCase.id !== "case-02") { layout.heading("Data Provenance"); layout.paragraph("Clinical media were read from browser-local object URLs, optionally restored from explicitly consented on-device IndexedDB storage, and embedded client-side. Preset educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
   addMediaPages(layout, input);
 
   let nextId = 6;

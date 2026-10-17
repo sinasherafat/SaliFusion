@@ -53,7 +53,12 @@ export function SaliFusionApp() {
   function closePreview() { if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current); previewUrlRef.current = null; setPdfPreview(null); }
   const updateSession = (next: CaseSession) => { closePreview(); setReportAction({ status: "idle" }); setSessions((current) => ({ ...current, [activeCaseId]: next })); };
   const patchSession = (patch: Partial<CaseSession>) => updateSession({ ...session, ...patch });
-  const updateExam = (next: GlandExam) => updateSession({ ...session, exams: session.exams.map((item) => item.id === next.id ? next : item) });
+  const updateExam = (next: GlandExam) => {
+    const previous = session.exams.find((item) => item.id === next.id);
+    const mediaSignature = (item?: GlandExam) => JSON.stringify({ ultrasound: Object.entries(item?.ultrasoundUploads ?? {}).map(([id, asset]) => [id, asset?.url]), phases: Object.entries(item?.phaseUploads ?? {}).map(([phase, asset]) => [phase, asset?.url]), cbct: item?.cbctImages.map((asset) => asset.url) ?? [] });
+    const mediaChanged = mediaSignature(previous) !== mediaSignature(next);
+    updateSession({ ...session, exams: session.exams.map((item) => item.id === next.id ? next : item), ...(mediaChanged ? { fusionGenerated: false, fusionReviewed: false, fusionImpression: "" } : {}) });
+  };
   function enterDemo(event: React.FormEvent) { event.preventDefault(); setScreen("cases"); }
   function startCase(caseId: CaseId) { setActiveCaseId(caseId); setScreen("workflow"); }
   function resetCase(caseId: CaseId) { const selected = getCompetitionCase(caseId)!; sessions[caseId].exams.forEach(revokeExam); setSessions((current) => ({ ...current, [caseId]: createSession(selected) })); }
@@ -69,7 +74,8 @@ export function SaliFusionApp() {
     const included = (["ultrasound", "sialography", "cbct"] as ClinicalModality[]).filter((modality) => reportExam.reviewed[modality]);
     const { media, warnings } = await collectReportMedia({ kind, demoCase, session, exam: reportExam, includedModalities: included });
     const defaultImpression = demoCase.id === "case-01" ? caseOneFusionDraft : demoCase.id === "case-02" ? caseTwoFusionDraft : demoCase.fusion.interpretation;
-    const bytes = createCompetitionPdf({ kind, demoCase, history: session.history, exam: reportExam, includedModalities: included, scores: demoCase.scores, media, fusionImpression: session.fusionImpression || defaultImpression, fusionReviewed: session.fusionReviewed });
+    const reportReviewed = kind === "ultrasound" || kind === "sialography" || kind === "cbct" ? Boolean(reportExam.reviewed[kind]) : Boolean(session.fusionReviewed);
+    const bytes = createCompetitionPdf({ kind, demoCase, history: session.history, exam: reportExam, includedModalities: included, scores: demoCase.scores, media, fusionImpression: session.fusionImpression || defaultImpression, fusionReviewed: session.fusionReviewed, reportReviewed });
     return { bytes, warnings };
   }
   async function previewPdf(kind: CompetitionReportInput["kind"]) { try { setReportAction({ kind, status: "generating", message: "Generating PDF..." }); const { bytes, warnings } = await buildPdf(kind); closePreview(); const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes).buffer], { type: "application/pdf" })); previewUrlRef.current = url; setPdfPreview({ kind, title: reportTitle(kind), url, fileName: reportFileName(kind), warnings }); setReportAction({ kind, status: "preview-ready", message: "Preview Ready." }); } catch (error) { console.error("Unable to render PDF", error); setReportAction({ kind, status: "error", message: "Unable to render PDF." }); } }
