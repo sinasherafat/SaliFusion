@@ -140,7 +140,7 @@ function CaseTwoUltrasoundWorkspace({ demoCase, session, exam, onSession }: { de
       for (const id of caseTwoLegacyIds) ultrasoundUploads[id] = { ...sharedAsset, id };
       return { ...item, ultrasoundUploads, reviewed: { ...item.reviewed, ultrasound: false }, clinicianVerified: { ...item.clinicianVerified, ultrasound: false } };
     });
-    onSession({ ...current, activeModality: "ultrasound", exams });
+    onSession({ ...current, activeModality: "ultrasound", exams, fusionGenerated: false, fusionReviewed: false, fusionImpression: "" });
     setStorageState(storage === "device" ? "stored" : "session");
   }
 
@@ -169,7 +169,7 @@ function CaseTwoUltrasoundWorkspace({ demoCase, session, exam, onSession }: { de
       for (const id of caseTwoLegacyIds) delete ultrasoundUploads[id];
       return { ...item, ultrasoundUploads, reviewed: { ...item.reviewed, ultrasound: false }, clinicianVerified: { ...item.clinicianVerified, ultrasound: false } };
     });
-    onSession({ ...current, exams, fusionGenerated: false, fusionReviewed: false });
+    onSession({ ...current, exams, fusionGenerated: false, fusionReviewed: false, fusionImpression: "" });
     setStorageState(storedVideoAvailable ? "stored" : "session");
   }
 

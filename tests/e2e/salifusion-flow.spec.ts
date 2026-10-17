@@ -55,7 +55,7 @@ test("case one supports independent findings and partial four-phase sialography"
 });
 
 test("case one browser-local media and image-bearing reports remain connected without upload requests", async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const writes: string[] = []; page.on("request", (request) => { if (["POST", "PUT", "PATCH"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`); });
   await enterDemo(page);
   await page.locator(".case-card").first().getByRole("button", { name: /Start Case/ }).click();
@@ -155,7 +155,7 @@ test("case one browser-local media and image-bearing reports remain connected wi
 });
 
 test("case two uses one local composite video for four views, independent reports, and clinical-ultrasound PDFs", async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const writes: string[] = []; page.on("request", (request) => { if (["POST", "PUT", "PATCH"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`); });
   await enterDemo(page);
   await page.locator(".case-card").nth(1).getByRole("button", { name: /Start Case/ }).click();
@@ -169,6 +169,10 @@ test("case two uses one local composite video for four views, independent report
   await page.getByLabel("Load Case 2 Video").setInputFiles({ name: "synthetic-four-panel.webm", mimeType: "video/webm;codecs=vp8", buffer: videoBytes });
   await expect(page.getByText("Video loaded", { exact: true })).toBeVisible();
   await expect(page.getByText(/Stored only in this authorized browser/)).toBeVisible();
+  await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
+  await expect(page.getByRole("button", { name: "Review Findings to Finalize Report" })).toBeVisible();
+  await expect(page.getByLabel("SaliFusion — Bilateral Parotid Ultrasound and Doppler Report inline PDF")).toHaveCount(0);
+  await page.getByRole("button", { name: "Review Findings to Finalize Report" }).click();
   await page.getByLabel("Switch gland examination").selectOption({ index: 1 });
   const video = page.locator(".case-two-video-viewport video");
   await expect(video).toHaveAttribute("src", /^blob:/);
@@ -192,29 +196,61 @@ test("case two uses one local composite video for four views, independent report
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
   const report = page.locator(".case-two-ultrasound-report");
   await expect(report.getByRole("heading", { name: "Bilateral Parotid Ultrasound and Doppler Report" })).toBeVisible();
-  await expect(report.getByRole("button", { name: "View Report", exact: true })).toBeVisible();
-  await expect(report.getByRole("button", { name: "View PDF", exact: true })).toBeEnabled();
-  await expect(report.getByRole("button", { name: "Download PDF", exact: true })).toBeEnabled();
-  await expect(report.getByText("Patient History Summary")).toBeVisible();
-  await expect(report.getByText("Right Parotid B-mode Findings")).toBeVisible();
-  await expect(report.getByText("Left Doppler Findings")).toBeVisible();
+  const ultrasoundInline = page.getByLabel("SaliFusion — Bilateral Parotid Ultrasound and Doppler Report inline PDF");
+  await expect(ultrasoundInline.getByRole("button", { name: "View Fullscreen" })).toBeEnabled();
+  await expect(ultrasoundInline.getByRole("button", { name: "Download PDF" })).toBeEnabled();
+  await expect(ultrasoundInline.getByRole("button", { name: "Print PDF" })).toBeEnabled();
 
-  async function inspectPdf(buttonName: string, dialogName: string, expectedText?: string) {
-    await page.getByRole("button", { name: buttonName, exact: true }).click(); const dialog = page.getByRole("dialog", { name: dialogName }); await expect(dialog).toBeVisible(); await expect(dialog.locator(".pdf-page-stack canvas").first()).toBeVisible(); const source = await dialog.locator(".pdf-page-stack").getAttribute("data-pdf-url"); const pdf = await page.evaluate(async (url) => new TextDecoder("windows-1252").decode(await (await fetch(url!)).arrayBuffer()), source); expect(pdf).toContain("%PDF-1.4"); expect((pdf.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(5); expect(pdf).toContain("/MediaBox [0 0 595.28 841.89]"); if (expectedText) expect(pdf).toContain(expectedText); await dialog.getByRole("button", { name: "Close PDF preview" }).click();
+  async function inspectInline(inline: ReturnType<typeof page.getByLabel>, expectedText?: string) {
+    const pages = inline.locator(".pdf-page-stack canvas");
+    await expect(pages.first()).toBeVisible();
+    await expect.poll(() => pages.count()).toBeGreaterThanOrEqual(6);
+    const source = await inline.locator(".pdf-page-stack").getAttribute("data-pdf-url");
+    const pdf = await page.evaluate(async (url) => new TextDecoder("windows-1252").decode(await (await fetch(url!)).arrayBuffer()), source);
+    expect(pdf).toContain("%PDF-1.4");
+    expect((pdf.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(5);
+    expect(pdf).toContain("/MediaBox [0 0 595.28 841.89]");
+    if (expectedText) expect(pdf).toContain(expectedText);
+    const scroller = inline.locator(".pdf-preview-canvas.inline");
+    await scroller.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+    await expect.poll(() => scroller.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+    return source;
+  }
+  async function inspectFullscreen(scope: ReturnType<typeof page.getByLabel>, buttonName: string, dialogName: string) {
+    await scope.getByRole("button", { name: buttonName, exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: dialogName });
+    await expect(dialog.locator(".pdf-page-stack canvas").first()).toBeVisible();
+    await dialog.getByRole("button", { name: "Close PDF preview" }).click();
   }
   async function archiveDownload(buttonName: string) { if (!process.env.PDF_QA_DIR) return; const pending = page.waitForEvent("download"); await page.getByRole("button", { name: buttonName, exact: true }).click(); const download = await pending; const path = await download.path(); expect(path).toBeTruthy(); await mkdir(process.env.PDF_QA_DIR, { recursive: true }); await copyFile(path!, join(process.env.PDF_QA_DIR, download.suggestedFilename())); }
-  await inspectPdf("View PDF", "Case 02 — Bilateral Parotid Ultrasound and Doppler Examination");
+  await inspectInline(ultrasoundInline);
+  await inspectFullscreen(ultrasoundInline, "View Fullscreen", "Case 02 — Bilateral Parotid Ultrasound and Doppler Examination");
   await archiveDownload("Download PDF");
   await page.getByRole("button", { name: /Continue to Fusion/ }).click();
   await page.getByRole("button", { name: "Generate Integrated Assessment" }).click();
-  await expect(page.getByRole("heading", { name: "Integrated Clinical and Ultrasound Assessment" })).toBeVisible();
-  await page.getByRole("button", { name: "Modify Impression" }).click(); const edited = "Clinician-reviewed Case 2 impression retained in browser-generated reports."; await page.getByLabel("Final imaging impression").fill(edited); await page.getByRole("button", { name: "Mark Reviewed" }).click();
-  await inspectPdf("View Integrated PDF", "Integrated Clinical and Ultrasound Assessment", edited);
+  await expect(page.locator("h1").filter({ hasText: "Integrated Clinical and Ultrasound Assessment" })).toBeVisible();
+  const integratedInline = page.getByLabel("Integrated Clinical and Ultrasound Assessment inline PDF");
+  const initialIntegratedUrl = await inspectInline(integratedInline);
+  await page.getByRole("button", { name: "Modify Impression" }).click(); const edited = "Clinician-reviewed Case 2 impression retained in browser-generated reports."; await page.getByLabel("Final imaging impression").fill(edited);
+  await page.getByRole("button", { name: "Mark Reviewed" }).click();
+  await expect.poll(async () => { const updated = await integratedInline.locator(".pdf-page-stack").getAttribute("data-pdf-url"); return Boolean(updated && updated !== initialIntegratedUrl); }).toBe(true);
+  await inspectInline(integratedInline, edited);
+  await inspectFullscreen(integratedInline, "View Fullscreen", "Integrated Clinical and Ultrasound Assessment");
   await archiveDownload("Download Integrated PDF");
   await page.getByRole("button", { name: /Continue to Final Report/ }).click();
-  await expect(page.getByRole("heading", { name: "Case 02 Complete Imaging Report" }).first()).toBeVisible();
-  await inspectPdf("View Complete Case PDF", "Case 02 Complete Imaging Report", edited);
-  await archiveDownload("Download Complete Case PDF");
+  await expect(page.getByRole("heading", { name: "SaliFusion — Case 02 Complete Imaging Report" }).first()).toBeVisible();
+  const completeInline = page.getByLabel("SaliFusion — Case 02 Complete Imaging Report inline PDF");
+  await inspectInline(completeInline, edited);
+  await inspectFullscreen(completeInline, "Open Fullscreen PDF", "Case 02 Complete Imaging Report");
+  await archiveDownload("Download Complete PDF");
+  await page.locator(".progress-nav button").filter({ hasText: "Imaging" }).click();
+  await page.getByRole("tab", { name: /US Ultrasound/ }).click();
+  await page.getByLabel("Load Case 2 Video").setInputFiles({ name: "replacement-four-panel.webm", mimeType: "video/webm;codecs=vp8", buffer: videoBytes });
+  await page.locator(".progress-nav button").filter({ hasText: "Modality Reports" }).click();
+  await expect(page.getByRole("button", { name: "Review Findings to Finalize Report" })).toBeVisible();
+  await expect(page.getByLabel("SaliFusion — Bilateral Parotid Ultrasound and Doppler Report inline PDF")).toHaveCount(0);
+  await page.locator(".progress-nav button").filter({ hasText: "Fusion" }).click();
+  await expect(page.getByRole("button", { name: "Generate Integrated Assessment" })).toBeDisabled();
   expect(writes).toEqual([]);
 });
 
