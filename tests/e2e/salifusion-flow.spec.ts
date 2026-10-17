@@ -33,42 +33,41 @@ test("approved landing entry exposes exactly five focused cases and editable his
   await page.getByLabel("Patient age").fill("43");
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
   await expect(page.getByRole("heading", { name: "Imaging workspace" })).toBeVisible();
-  await expect(page.getByText("Ultrasound pending")).toBeVisible();
-  await expect(page.getByText("0/4 sialography phases ready")).toBeVisible();
+  await expect(page.getByText(/Built-in Clinical Demo Media · Ultrasound ready · 4\/4 sialography phases ready/)).toBeVisible();
   await page.getByRole("button", { name: "All cases" }).click();
   await page.locator(".case-card").first().getByRole("button", { name: /Continue at Imaging/ }).click();
   await page.getByRole("button", { name: "History" }).click();
   await expect(page.getByLabel("Patient age")).toHaveValue("43");
 });
 
-test("case one supports independent findings and partial four-phase sialography", async ({ page }) => {
+test("case one preloads the ordered four-phase study and permits a browser-local replacement", async ({ page }) => {
   await enterDemo(page);
   await page.locator(".case-card").first().getByRole("button", { name: /Start Case/ }).click();
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
   await page.getByRole("tab", { name: /2D Sialography/ }).click();
   await expect(page.getByText("Dedicated ductal mapping may be considered")).toBeVisible();
   await expect(page.locator(".phase-card")).toHaveCount(4);
-  await expect(page.getByText(/Not Documented/)).toBeVisible();
+  await expect(page.locator(".phase-card img")).toHaveCount(4);
+  await expect(page.getByText(/Phase-specific interpretation · Five minutes/)).toBeVisible();
   await page.getByLabel("Upload Ductal filling").setInputFiles({ name: "synthetic-ductal", mimeType: "image/png", buffer: pixelPng });
-  await expect(page.getByText(/1 of 4 phases available/)).toBeVisible();
+  await expect(page.getByText(/4 of 4 phases available/)).toBeVisible();
   await expect(page.locator(".phase-card").filter({ hasText: "Ductal filling" }).getByRole("button", { name: "Remove", exact: true })).toBeVisible();
 });
 
-test("case one browser-local media and image-bearing reports remain connected without upload requests", async ({ page }) => {
+test("case one built-in media, fusion, and image-bearing reports remain connected without uploads", async ({ page }) => {
   test.setTimeout(180_000);
   const writes: string[] = []; page.on("request", (request) => { if (["POST", "PUT", "PATCH"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`); });
   await enterDemo(page);
   await page.locator(".case-card").first().getByRole("button", { name: /Start Case/ }).click();
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
-  const videoBytes = await syntheticVideo(page);
-  await page.getByLabel("Load Case 1 ultrasound video").setInputFiles({ name: "synthetic-review.webm", mimeType: "video/webm;codecs=vp8", buffer: videoBytes });
-  await page.getByLabel("Load Case 1 Scout / precontrast").setInputFiles({ name: "synthetic-scout", mimeType: "image/png", buffer: pixelPng });
-  await page.getByLabel("Load Case 1 Ductal filling").setInputFiles({ name: "synthetic-ductal", mimeType: "image/png", buffer: pixelPng });
-  await page.getByLabel("Load Case 1 Acinar / parenchymal filling").setInputFiles({ name: "synthetic-acinar", mimeType: "image/png", buffer: pixelPng });
-  await page.getByLabel("Load Case 1 Evacuation").setInputFiles({ name: "synthetic-evacuation", mimeType: "image/png", buffer: pixelPng });
-  await expect(page.getByText("Ultrasound ready")).toBeVisible(); await expect(page.getByText("4/4 sialography phases ready")).toBeVisible();
+  await expect(page.getByText(/Built-in Clinical Demo Media · Ultrasound ready · 4\/4 sialography phases ready/)).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: /Enter Clinical Demo/ }).click();
+  await page.locator(".case-card").first().getByRole("button", { name: /Start Case/ }).click();
+  await page.getByRole("button", { name: /Continue to Imaging/ }).click();
+  await expect(page.getByText(/Built-in Clinical Demo Media · Ultrasound ready · 4\/4 sialography phases ready/)).toBeVisible();
   const video = page.locator("video");
-  await expect(video).toHaveAttribute("src", /^blob:/);
+  await expect(video).toHaveAttribute("src", /\/demo-cases\/case-01\/left-submandibular-ultrasound\.mp4$/);
   await page.getByRole("button", { name: "Play / Pause" }).click();
   await expect.poll(() => video.evaluate((node: HTMLVideoElement) => node.currentTime)).toBeGreaterThan(0);
   await page.getByRole("button", { name: "Review educational reference findings" }).click();
@@ -76,8 +75,10 @@ test("case one browser-local media and image-bearing reports remain connected wi
   await page.getByRole("tab", { name: /2D Sialography/ }).click();
   const phaseImages = page.locator(".phase-card img");
   await expect(phaseImages).toHaveCount(4);
-  await expect.poll(() => phaseImages.evaluateAll((images: HTMLImageElement[]) => images.every((image) => image.src.startsWith("blob:") && image.naturalWidth === 1 && image.naturalHeight === 1))).toBe(true);
-  await expect(page.getByText(/Phase-specific interpretation · Not Documented/)).toBeVisible();
+  await expect.poll(() => phaseImages.evaluateAll((images: HTMLImageElement[]) => images.every((image) => image.src.includes("/demo-cases/case-01/") && image.naturalWidth > 1000 && image.naturalHeight > 700))).toBe(true);
+  await expect(page.getByText(/Phase-specific interpretation · Five minutes/)).toBeVisible();
+  await page.getByText(/Phase-specific interpretation · Five minutes/).click();
+  await expect(page.getByText(/Incomplete contrast evacuation at five minutes, indicating delayed ductal clearance/)).toBeVisible();
   await page.getByRole("button", { name: "Review educational reference findings" }).click();
   await page.getByRole("button", { name: "Confirm clinician review" }).click();
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
@@ -121,8 +122,7 @@ test("case one browser-local media and image-bearing reports remain connected wi
   await expect(page.getByRole("heading", { name: "Modality Reports" })).toBeVisible();
   const ultrasoundReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Ultrasound Report" }) });
   const sialographyReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Four-Phase Sialography Report" }) });
-  await expect(ultrasoundReport).toContainText("Browser-local ultrasound media are available");
-  await expect(ultrasoundReport).not.toContainText("awaiting user-supplied media");
+  await expect(ultrasoundReport).toContainText("owner-authorized built-in ultrasound video");
   await expect(sialographyReport.locator(".phase-thumbnail-row img")).toHaveCount(4);
   await expect(page.getByText("No CBCT study provided")).toBeVisible();
   await previewPdf(ultrasoundReport, "Ultrasound Report");
@@ -173,8 +173,8 @@ test("case one restores consented media and transfers a private bundle between i
   await page.getByLabel("Load Case 1 Ductal filling").setInputFiles({ name: "persistent-ductal.png", mimeType: "image/png", buffer: pixelPng });
   await page.getByLabel("Load Case 1 Acinar / parenchymal filling").setInputFiles({ name: "persistent-acinar.png", mimeType: "image/png", buffer: pixelPng });
   await page.getByLabel("Load Case 1 Evacuation").setInputFiles({ name: "persistent-evacuation.png", mimeType: "image/png", buffer: pixelPng });
-  await expect(page.getByText("Ultrasound ready · 4/4 sialography phases ready")).toBeVisible();
-  await expect(page.getByText(/5\/5 files stored only in this browser origin/)).toBeVisible();
+  await expect(page.getByText(/Ultrasound ready · 4\/4 sialography phases ready/)).toBeVisible();
+  await expect(page.getByText(/5\/5 replacement files stored only in this browser origin/)).toBeVisible();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export Private Case Media" }).click();
   const download = await downloadPromise;
@@ -188,8 +188,8 @@ test("case one restores consented media and transfers a private bundle between i
   await page.locator(".case-card").first().getByRole("button", { name: /Start Case/ }).click();
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
   await expect(page.getByText("persistent-ultrasound.webm")).toBeVisible();
-  await expect(page.getByText("Ultrasound ready · 4/4 sialography phases ready")).toBeVisible();
-  await expect(page.getByText(/5\/5 files stored only in this browser origin/)).toBeVisible();
+  await expect(page.getByText(/Ultrasound ready · 4\/4 sialography phases ready/)).toBeVisible();
+  await expect(page.getByText(/5\/5 replacement files stored only in this browser origin/)).toBeVisible();
   await expect(page.locator(".phase-card img")).toHaveCount(0);
   await page.getByRole("tab", { name: /2D Sialography/ }).click();
   await expect(page.locator(".phase-card img")).toHaveCount(4);
@@ -198,7 +198,7 @@ test("case one restores consented media and transfers a private bundle between i
   await page.getByRole("button", { name: /Enter Clinical Demo/ }).click();
   await page.locator(".case-card").first().getByRole("button", { name: /Start Case/ }).click();
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
-  await expect(page.getByText("Ultrasound pending · 0/4 sialography phases ready")).toBeVisible();
+  await expect(page.getByText(/Built-in Clinical Demo Media · Ultrasound ready · 4\/4 sialography phases ready/)).toBeVisible();
   await page.getByLabel("Import Case 1 private media bundle").setInputFiles({ name: "case-01.salifusion-media", mimeType: "application/vnd.salifusion.private-media", buffer: bundleBytes });
   await expect(page.getByText(/Imported 5 Case 1 files locally/)).toBeVisible();
   await expect(page.getByText("persistent-ultrasound.webm")).toBeVisible();
@@ -207,7 +207,7 @@ test("case one restores consented media and transfers a private bundle between i
   expect(writes).toEqual([]);
 });
 
-test("case two uses one local composite video for four views, independent reports, and clinical-ultrasound PDFs", async ({ page }) => {
+test("case two uses one built-in composite video for four views, independent reports, and clinical-ultrasound PDFs", async ({ page }) => {
   test.setTimeout(180_000);
   const writes: string[] = []; page.on("request", (request) => { if (["POST", "PUT", "PATCH"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`); });
   await enterDemo(page);
@@ -217,11 +217,12 @@ test("case two uses one local composite video for four views, independent report
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
   await expect(page.getByText("Case 2 — Bilateral Parotid Ultrasound Comparison")).toBeVisible();
   await expect(page.getByLabel("Load Case 2 Video")).toHaveCount(1);
-  const videoBytes = await syntheticVideo(page);
-  await page.getByLabel("Remember this video on this device").check();
-  await page.getByLabel("Load Case 2 Video").setInputFiles({ name: "synthetic-four-panel.webm", mimeType: "video/webm;codecs=vp8", buffer: videoBytes });
-  await expect(page.getByText("Video loaded", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Stored only in this authorized browser/)).toBeVisible();
+  await expect(page.getByText("Built-in video ready", { exact: true })).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: /Enter Clinical Demo/ }).click();
+  await page.locator(".case-card").nth(1).getByRole("button", { name: /Start Case/ }).click();
+  await page.getByRole("button", { name: /Continue to Imaging/ }).click();
+  await expect(page.getByText("Built-in video ready", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
   await expect(page.getByRole("button", { name: "Review Findings to Finalize Report" })).toBeVisible();
   const draftInline = page.getByLabel("SaliFusion — Bilateral Parotid Ultrasound and Doppler Report inline PDF");
@@ -230,7 +231,7 @@ test("case two uses one local composite video for four views, independent report
   await page.getByRole("button", { name: "Review Findings to Finalize Report" }).click();
   await page.getByLabel("Switch gland examination").selectOption({ index: 1 });
   const video = page.locator(".case-two-video-viewport video");
-  await expect(video).toHaveAttribute("src", /^blob:/);
+  await expect(video).toHaveAttribute("src", /\/demo-cases\/case-02\/bilateral-parotid-composite-ultrasound\.mp4$/);
   await expect(page.getByRole("tab", { name: /Full Comparison/ })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: /Left B-mode/ }).click();
   await expect(page.getByTestId("case-two-composite-stage")).toHaveClass(/region-lower-left/);
@@ -300,6 +301,7 @@ test("case two uses one local composite video for four views, independent report
   await archiveDownload(completeInline, "Download Complete PDF");
   await page.locator(".progress-nav button").filter({ hasText: "Imaging" }).click();
   await page.getByRole("tab", { name: /US Ultrasound/ }).click();
+  const videoBytes = await syntheticVideo(page);
   await page.getByLabel("Load Case 2 Video").setInputFiles({ name: "replacement-four-panel.webm", mimeType: "video/webm;codecs=vp8", buffer: videoBytes });
   await page.locator(".progress-nav button").filter({ hasText: "Modality Reports" }).click();
   await expect(page.getByRole("button", { name: "Review Findings to Finalize Report" })).toBeVisible();
@@ -316,9 +318,9 @@ test("case two restores an explicitly consented video from browser-local storage
   await page.locator(".case-card").nth(1).getByRole("button", { name: /Start Case/ }).click();
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
   const videoBytes = await syntheticVideo(page);
-  await page.getByLabel("Remember this video on this device").check();
   await page.getByLabel("Load Case 2 Video").setInputFiles({ name: "persistent-synthetic-four-panel.webm", mimeType: "video/webm;codecs=vp8", buffer: videoBytes });
-  await expect(page.getByText(/Stored only in this authorized browser/)).toBeVisible();
+  await page.getByLabel("Remember this video on this device").check();
+  await expect(page.getByText(/replacement is stored only in this authorized browser/i)).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: /Enter Clinical Demo/ }).click();
   await page.locator(".case-card").nth(1).getByRole("button", { name: /Start Case/ }).click();

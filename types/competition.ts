@@ -113,6 +113,7 @@ export interface CompetitionCase {
   cbct: ModalityFixture;
   fusion: ModalityFixture;
   scores: ScoreFixture[];
+  evacuationTimeMinutes?: number;
 }
 
 export interface UploadedAsset {
@@ -121,7 +122,7 @@ export interface UploadedAsset {
   url: string;
   kind: "video" | "image";
   objectUrl: boolean;
-  storage?: "session" | "device";
+  storage?: "session" | "device" | "built-in";
   type?: string;
   lastModified?: number;
 }
@@ -130,7 +131,7 @@ export interface PhaseAsset {
   name: string;
   url: string;
   objectUrl: boolean;
-  storage?: "session" | "device";
+  storage?: "session" | "device" | "built-in";
   type?: string;
   lastModified?: number;
 }

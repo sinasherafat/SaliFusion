@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { COMPETITION_CASES, CORE_HISTORY_QUESTION_COUNT } from "@/data/competition-cases";
-import { DEMO_MEDIA_SLOTS } from "@/data/demo-media";
+import { builtInMediaForCase, CASE_ONE_PHASE_PATHS, CASE_ONE_ULTRASOUND_PATH, CASE_TWO_COMPOSITE_PATH, DEMO_MEDIA_SLOTS } from "@/data/demo-media";
 import { DIAGNOSTIC_SUPPORT_SCORES, SCORE_DISCLAIMER } from "@/data/diagnostic-scores";
 import { compatibleForFusion, examIdentity, getDuctalRecommendation, historyCompleteness } from "@/lib/clinical/competition-rules";
 import { createCompetitionPdf } from "@/lib/report/competition-pdf";
@@ -35,7 +35,18 @@ describe("five-case competition fixture", () => {
     expect(DEMO_MEDIA_SLOTS.filter((slot) => slot.caseId === "case-02" && !slot.composite).map((slot) => slot.sourceRegion).sort()).toEqual(["lower-left", "lower-right", "upper-left", "upper-right"]);
     expect(DEMO_MEDIA_SLOTS.some((slot) => slot.id === "case-04-provisional-left-submandibular-ultrasound")).toBe(true);
     expect(DEMO_MEDIA_SLOTS.some((slot) => slot.id === "case-05-right-submandibular-ultrasound")).toBe(true);
-    expect(DEMO_MEDIA_SLOTS.every((slot) => slot.status === "awaiting-upload" && slot.mediaUrl === undefined)).toBe(true);
+    expect(DEMO_MEDIA_SLOTS.find((slot) => slot.id === "case-01-left-submandibular-bmode")).toMatchObject({ status: "ready", mediaUrl: CASE_ONE_ULTRASOUND_PATH });
+    expect(DEMO_MEDIA_SLOTS.find((slot) => slot.id === "case-02-bilateral-parotid-composite-ultrasound")).toMatchObject({ status: "ready", mediaUrl: CASE_TWO_COMPOSITE_PATH });
+    expect(DEMO_MEDIA_SLOTS.filter((slot) => !["case-01", "case-02"].includes(slot.caseId)).every((slot) => slot.status === "awaiting-upload" && slot.mediaUrl === undefined)).toBe(true);
+  });
+
+  it("maps the six authorized built-in files to the correct Case 1 phases and Case 2 composite slot", () => {
+    const caseOne = builtInMediaForCase("case-01");
+    expect(caseOne.ultrasoundUploads["case-01-left-submandibular-bmode"]).toMatchObject({ url: CASE_ONE_ULTRASOUND_PATH, storage: "built-in", objectUrl: false });
+    expect(Object.fromEntries(phaseIds.map((phase) => [phase, caseOne.phaseUploads[phase]?.url]))).toEqual(CASE_ONE_PHASE_PATHS);
+    expect(Object.values(caseOne.phaseUploads).every((asset) => asset?.storage === "built-in")).toBe(true);
+    const caseTwo = builtInMediaForCase("case-02");
+    expect(caseTwo.ultrasoundUploads["case-02-bilateral-parotid-composite-ultrasound"]).toMatchObject({ url: CASE_TWO_COMPOSITE_PATH, storage: "built-in", objectUrl: false });
   });
 });
 
@@ -44,11 +55,13 @@ describe("independent four-phase sialography source of truth", () => {
     for (const item of COMPETITION_CASES) expect(Object.keys(item.sialographyPhases)).toEqual(phaseIds);
   });
 
-  it("keeps Case 1 educational references separate and records an undocumented evacuation interval", () => {
+  it("keeps Case 1 educational references separate and records the confirmed five-minute evacuation interval", () => {
     const item = byId("case-01");
-    expect(item.sialography.observedFindings.every((finding) => finding.startsWith("Preset educational reference:"))).toBe(true);
-    expect(item.sialographyPhases.evacuation.timing).toBe("Not Documented");
-    expect(item.sialographyPhases.evacuation.interpretation).toMatch(/Delayed clearance cannot be concluded/i);
+    expect(item.evacuationTimeMinutes).toBe(5);
+    expect(item.sialographyPhases.evacuation.timing).toBe("Five minutes");
+    expect(item.sialographyPhases.evacuation.interpretation).toMatch(/Incomplete contrast evacuation at five minutes.*functional impairment of glandular drainage/i);
+    expect(item.sialography.interpretation).toMatch(/Incomplete contrast evacuation at five minutes/i);
+    expect(item.fusion.interpretation).toMatch(/Persistent contrast retention at five minutes/i);
   });
 
   it("preserves Case 2 B-mode/Doppler comparison and records that sialography was not performed", () => {
@@ -122,7 +135,7 @@ describe("fusion, provenance, and reports", () => {
   });
 
   it("does not transfer preset diagnoses to unrelated uploads", () => {
-    expect(DEMO_MEDIA_SLOTS.every((slot) => slot.mediaUrl === undefined && slot.status === "awaiting-upload")).toBe(true);
+    expect(DEMO_MEDIA_SLOTS.filter((slot) => !["case-01", "case-02"].includes(slot.caseId)).every((slot) => slot.mediaUrl === undefined && slot.status === "awaiting-upload")).toBe(true);
     expect(byId("case-05").ultrasound.observedFindings).toHaveLength(0);
     expect(byId("case-05").ultrasound.interpretation).toMatch(/No ultrasound findings are manufactured/i);
   });
@@ -143,6 +156,16 @@ describe("fusion, provenance, and reports", () => {
     expect(text).toMatch(/DUCTAL FILLING/);
     expect(text).toMatch(/ACINAR \/ PARENCHYMAL FILLING/);
     expect(text).toMatch(/EVACUATION - FIVE MINUTES/);
+  });
+
+  it.each(["sialography", "fusion", "complete"] as const)("includes Case 1 five-minute evacuation wording in the %s PDF", (kind) => {
+    const demoCase = byId("case-01");
+    const media = builtInMediaForCase("case-01");
+    const exam = { ...emptyExam(), gland: "submandibular" as const, reviewed: { ultrasound: true, sialography: true }, clinicianVerified: { ultrasound: true, sialography: true }, ...media };
+    const bytes = createCompetitionPdf({ kind, demoCase, history: demoCase.history, exam, includedModalities: ["ultrasound", "sialography"], fusionImpression: demoCase.fusion.interpretation, fusionReviewed: true, reportReviewed: true });
+    const text = new TextDecoder().decode(bytes);
+    expect(text).toContain("Incomplete contrast evacuation at five minutes");
+    expect(text).toMatch(/impaired ductal drainage|functional impairment of glandular drainage/i);
   });
 
   it("creates a Case 2 clinical-ultrasound report without inventing sialography fusion", () => {

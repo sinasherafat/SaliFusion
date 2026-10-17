@@ -2,11 +2,11 @@
 
 import Image from "next/image";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { mediaSlotsForCase } from "@/data/demo-media";
+import { builtInMediaForCase, mediaSlotsForCase } from "@/data/demo-media";
 import { getDuctalRecommendation } from "@/lib/clinical/competition-rules";
 import { groupDicomSeries } from "@/lib/dicom/parse-dicom";
 import { createPrivateMediaBundle, downloadPrivateMediaBundle, parsePrivateMediaBundle, type PrivateMediaBundleItem } from "@/lib/media/private-media-bundle";
-import { clearPrivateMediaStorage, clearStoredCaseMedia, hasPrivateMediaConsent, loadStoredCaseMedia, loadStoredCaseTwoVideo, PRIVATE_MEDIA_CHANGED_EVENT, removeStoredCaseTwoVideo, removeStoredPrivateMedia, setPrivateMediaConsent, storeCaseTwoVideo, storePrivateMedia, supportsPrivateMediaStorage, type StoredPrivateMedia } from "@/lib/media/private-media-store";
+import { clearStoredCaseMedia, hasPrivateMediaConsent, loadStoredCaseMedia, loadStoredCaseTwoVideo, PRIVATE_MEDIA_CHANGED_EVENT, removeStoredCaseTwoVideo, removeStoredPrivateMedia, setPrivateMediaConsent, storeCaseTwoVideo, storePrivateMedia, supportsPrivateMediaStorage, type StoredPrivateMedia } from "@/lib/media/private-media-store";
 import type { CaseSession, CompetitionCase, GlandExam, PhaseAsset, SialographyPhase, SialographyPhaseFixture, UploadedAsset } from "@/types/competition";
 
 const MprViewer = lazy(() => import("@/components/viewers/cornerstone-mpr-viewer").then((module) => ({ default: module.CornerstoneMprViewer })));
@@ -87,7 +87,9 @@ function CaseOneLocalMediaLoader({ session, onSession }: { session: CaseSession;
     void loadStoredCaseMedia("case-01").then((stored) => {
       if (cancelled) return;
       setStoredCount(stored.length);
-      if (stored.length && !sessionRef.current.exams[0].ultrasoundUploads[caseOneUltrasoundId] && !Object.values(sessionRef.current.exams[0].phaseUploads).some(Boolean)) {
+      const activeExam = sessionRef.current.exams[0];
+      const hasReplacement = Object.values(activeExam.ultrasoundUploads).some((asset) => Boolean(asset && asset.storage !== "built-in")) || Object.values(activeExam.phaseUploads).some((asset) => Boolean(asset && asset.storage !== "built-in"));
+      if (stored.length && !hasReplacement) {
         setPersistOnDevice(true); setPrivateMediaConsent("case-01", true); attachItems(stored, "device");
       } else setStorageState(stored.length ? "stored" : "session");
     }).catch(() => { if (!cancelled) setStorageState("error"); });
@@ -101,8 +103,8 @@ function CaseOneLocalMediaLoader({ session, onSession }: { session: CaseSession;
   async function currentBundleItems() {
     const current = sessionRef.current.exams[0];
     const assets: Array<{ slot: string; asset: UploadedAsset | PhaseAsset }> = [];
-    const ultrasound = current.ultrasoundUploads[caseOneUltrasoundId]; if (ultrasound) assets.push({ slot: caseOneUltrasoundId, asset: ultrasound });
-    for (const phase of phases) { const asset = current.phaseUploads[phase]; if (asset) assets.push({ slot: caseOnePhaseSlots[phase], asset }); }
+    const ultrasound = current.ultrasoundUploads[caseOneUltrasoundId]; if (ultrasound && ultrasound.storage !== "built-in") assets.push({ slot: caseOneUltrasoundId, asset: ultrasound });
+    for (const phase of phases) { const asset = current.phaseUploads[phase]; if (asset && asset.storage !== "built-in") assets.push({ slot: caseOnePhaseSlots[phase], asset }); }
     return Promise.all(assets.map(async ({ slot, asset }) => {
       const blob = await (await fetch(asset.url)).blob();
       return { slot, blob, name: asset.name, type: asset.type || blob.type || "application/octet-stream", lastModified: asset.lastModified ?? Date.now() } satisfies PrivateMediaBundleItem;
@@ -132,21 +134,23 @@ function CaseOneLocalMediaLoader({ session, onSession }: { session: CaseSession;
 
   async function removeItem(slot: string) {
     const current = sessionRef.current; const primary = current.exams[0]; const ultrasoundUploads = { ...primary.ultrasoundUploads }; const phaseUploads = { ...primary.phaseUploads };
-    if (slot === caseOneUltrasoundId) { const old = ultrasoundUploads[slot]; if (old?.objectUrl) URL.revokeObjectURL(old.url); delete ultrasoundUploads[slot]; }
-    else { const phase = caseOneSlotPhases[slot]; const old = phaseUploads[phase]; if (old?.objectUrl) URL.revokeObjectURL(old.url); delete phaseUploads[phase]; }
+    const builtIn = builtInMediaForCase("case-01");
+    if (slot === caseOneUltrasoundId) { const old = ultrasoundUploads[slot]; if (old?.objectUrl) URL.revokeObjectURL(old.url); ultrasoundUploads[slot] = builtIn.ultrasoundUploads[slot]; }
+    else { const phase = caseOneSlotPhases[slot]; const old = phaseUploads[phase]; if (old?.objectUrl) URL.revokeObjectURL(old.url); phaseUploads[phase] = builtIn.phaseUploads[phase]; }
     if (supportsPrivateMediaStorage()) { try { await removeStoredPrivateMedia("case-01", slot); } catch { setStorageState("error"); } }
     const nextExam = { ...primary, ultrasoundUploads, phaseUploads, reviewed: { ...primary.reviewed, ultrasound: false, sialography: false }, clinicianVerified: { ...primary.clinicianVerified, ultrasound: false, sialography: false } };
     onSession({ ...current, exams: current.exams.map((item) => item.id === primary.id ? nextExam : item), fusionGenerated: false, fusionReviewed: false, fusionImpression: "" });
   }
 
   async function clearCaseMedia() {
-    if (!window.confirm("Clear all five Case 1 media files from this session and browser-local storage?")) return;
+    if (!window.confirm("Clear Case 1 replacement files and restore all five built-in clinical demo assets?")) return;
     const current = sessionRef.current; const primary = current.exams[0];
     Object.values(primary.ultrasoundUploads).forEach((asset) => { if (asset?.objectUrl) URL.revokeObjectURL(asset.url); });
     Object.values(primary.phaseUploads).forEach((asset) => { if (asset?.objectUrl) URL.revokeObjectURL(asset.url); });
     if (supportsPrivateMediaStorage()) { try { await clearStoredCaseMedia("case-01"); } catch { setStorageState("error"); return; } }
     setPersistOnDevice(false); setStoredCount(0); setTransferMessage("");
-    const nextExam = { ...primary, ultrasoundUploads: {}, phaseUploads: {}, reviewed: { ...primary.reviewed, ultrasound: false, sialography: false }, clinicianVerified: { ...primary.clinicianVerified, ultrasound: false, sialography: false } };
+    const builtIn = builtInMediaForCase("case-01");
+    const nextExam = { ...primary, ultrasoundUploads: builtIn.ultrasoundUploads, phaseUploads: builtIn.phaseUploads, reviewed: { ...primary.reviewed, ultrasound: false, sialography: false }, clinicianVerified: { ...primary.clinicianVerified, ultrasound: false, sialography: false } };
     onSession({ ...current, exams: current.exams.map((item) => item.id === primary.id ? nextExam : item), fusionGenerated: false, fusionReviewed: false, fusionImpression: "" });
     setStorageState(supportsPrivateMediaStorage() ? "session" : "unavailable");
   }
@@ -166,15 +170,16 @@ function CaseOneLocalMediaLoader({ session, onSession }: { session: CaseSession;
     } catch (error) { setTransferMessage(error instanceof Error ? error.message : "Unable to import the private media bundle."); }
   }
 
-  const persistenceMessage = storageState === "stored" ? `${storedCount}/5 files stored only in this browser origin.` : storageState === "unavailable" ? "IndexedDB is unavailable; current files remain session-only." : storageState === "error" ? "Browser-local persistence was unavailable or denied; loaded files remain session-only." : "Session-only unless optional device persistence is selected.";
-  return <section className="case-one-local-loader" aria-label="Case 1 browser-local media import">
-    <header><div><span>Private review setup</span><h2>Load Case 1 media from this device</h2></div><p>Files remain in this browser. Optional persistence uses this device and this Preview origin only; nothing is submitted to a server, remote API, cloud storage, or analytics service.</p></header>
+  const replacementCount = Number(Boolean(canonicalExam.ultrasoundUploads[caseOneUltrasoundId] && canonicalExam.ultrasoundUploads[caseOneUltrasoundId]?.storage !== "built-in")) + phases.filter((phase) => Boolean(canonicalExam.phaseUploads[phase] && canonicalExam.phaseUploads[phase]?.storage !== "built-in")).length;
+  const persistenceMessage = storageState === "stored" ? `${storedCount}/5 replacement files stored only in this browser origin.` : storageState === "unavailable" ? "IndexedDB is unavailable; replacements remain session-only." : storageState === "error" ? "Browser-local persistence was unavailable or denied; replacements remain session-only." : "Optional replacements remain session-only unless device persistence is selected.";
+  return <section className="case-one-local-loader" aria-label="Case 1 built-in and browser-local media">
+    <header><div><span>Built-in Clinical Demo Media</span><h2>Case 1 media are ready</h2></div><p>The owner-authorized, de-identified ultrasound and four ordered sialography phases load from this protected Preview. Optional replacements are processed only in this browser and are never submitted to a server, remote API, cloud storage, or analytics service.</p></header>
     <div className="local-loader-grid">
-      <div className={`case-one-media-slot ${canonicalExam.ultrasoundUploads[ultrasoundSlot.id] ? "loaded" : ""}`}><label><span>01 · Ultrasound</span><strong>{canonicalExam.ultrasoundUploads[ultrasoundSlot.id]?.name || "Choose the B-mode MOV"}</strong><input type="file" accept="video/*,.mov" aria-label="Load Case 1 ultrasound video" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void loadItem(caseOneUltrasoundId, file); }} /></label>{canonicalExam.ultrasoundUploads[ultrasoundSlot.id] && <button onClick={() => void removeItem(caseOneUltrasoundId)}>Remove</button>}</div>
-      {phaseInputs.map(({ phase, label }, index) => <div className={`case-one-media-slot ${canonicalExam.phaseUploads[phase] ? "loaded" : ""}`} key={phase}><label><span>0{index + 2} · {label}</span><strong>{canonicalExam.phaseUploads[phase]?.name || "Choose the matching image"}</strong><input type="file" accept="image/*" aria-label={`Load Case 1 ${label}`} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void loadItem(caseOnePhaseSlots[phase], file); }} /></label>{canonicalExam.phaseUploads[phase] && <button onClick={() => void removeItem(caseOnePhaseSlots[phase])}>Remove</button>}</div>)}
+      <div className={`case-one-media-slot ${canonicalExam.ultrasoundUploads[ultrasoundSlot.id] ? "loaded" : ""}`}><label><span>01 · Ultrasound</span><strong>{canonicalExam.ultrasoundUploads[ultrasoundSlot.id]?.name || "Choose the B-mode MOV"}</strong><input type="file" accept="video/*,.mov" aria-label="Load Case 1 ultrasound video" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void loadItem(caseOneUltrasoundId, file); }} /></label>{canonicalExam.ultrasoundUploads[ultrasoundSlot.id]?.storage !== "built-in" && <button onClick={() => void removeItem(caseOneUltrasoundId)}>Restore built-in</button>}</div>
+      {phaseInputs.map(({ phase, label }, index) => <div className={`case-one-media-slot ${canonicalExam.phaseUploads[phase] ? "loaded" : ""}`} key={phase}><label><span>0{index + 2} · {label}</span><strong>{canonicalExam.phaseUploads[phase]?.name || "Choose the matching image"}</strong><input type="file" accept="image/*" aria-label={`Load Case 1 ${label}`} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void loadItem(caseOnePhaseSlots[phase], file); }} /></label>{canonicalExam.phaseUploads[phase]?.storage !== "built-in" && <button onClick={() => void removeItem(caseOnePhaseSlots[phase])}>Restore built-in</button>}</div>)}
     </div>
-    <div className="private-media-toolbar"><label className="case-two-persistence-consent"><input type="checkbox" aria-label="Remember all Case 1 media on this device" checked={persistOnDevice} disabled={!supportsPrivateMediaStorage()} onChange={(event) => void setPersistence(event.target.checked)} />Remember all Case 1 media on this device</label><button onClick={() => void exportBundle()} disabled={!canonicalExam.ultrasoundUploads[caseOneUltrasoundId] && !Object.values(canonicalExam.phaseUploads).some(Boolean)}>Export Private Case Media</button><label className="private-media-import">Import Private Case Media<input hidden type="file" accept=".salifusion-media,application/vnd.salifusion.private-media" aria-label="Import Case 1 private media bundle" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void importBundle(file); }} /></label><button className="danger" onClick={() => void clearCaseMedia()} disabled={!canonicalExam.ultrasoundUploads[caseOneUltrasoundId] && !Object.values(canonicalExam.phaseUploads).some(Boolean) && !storedCount}>Clear Private Media</button></div>
-    <div className={`case-one-storage-status ${storageState}`} role="status"><b>{canonicalExam.ultrasoundUploads[caseOneUltrasoundId] ? "Ultrasound ready" : "Ultrasound pending"} · {phases.filter((phase) => canonicalExam.phaseUploads[phase]).length}/4 sialography phases ready</b><span>{persistenceMessage} Preview origins are isolated; use the local export/import bundle when moving to a new Preview.</span>{transferMessage && <small>{transferMessage}</small>}</div>
+    <div className="private-media-toolbar"><label className="case-two-persistence-consent"><input type="checkbox" aria-label="Remember all Case 1 media on this device" checked={persistOnDevice} disabled={!supportsPrivateMediaStorage()} onChange={(event) => void setPersistence(event.target.checked)} />Remember Case 1 replacements on this device</label><button onClick={() => void exportBundle()} disabled={!replacementCount}>Export Private Case Media</button><label className="private-media-import">Import Private Case Media<input hidden type="file" accept=".salifusion-media,application/vnd.salifusion.private-media" aria-label="Import Case 1 private media bundle" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void importBundle(file); }} /></label><button className="danger" onClick={() => void clearCaseMedia()} disabled={!replacementCount && !storedCount}>Restore Built-in Media</button></div>
+    <div className={`case-one-storage-status ${storageState}`} role="status"><b>Built-in Clinical Demo Media · {canonicalExam.ultrasoundUploads[caseOneUltrasoundId] ? "Ultrasound ready" : "Ultrasound pending"} · {phases.filter((phase) => canonicalExam.phaseUploads[phase]).length}/4 sialography phases ready</b><span>{persistenceMessage} The five built-in assets return whenever this demonstration is reset.</span>{transferMessage && <small>{transferMessage}</small>}</div>
   </section>;
 }
 
@@ -197,7 +202,7 @@ function UltrasoundWorkspace({ demoCase, session, exam, onSession, onExam }: { d
   </div><div className="playback-bar"><button onClick={() => videoRef.current?.paused ? void videoRef.current.play() : videoRef.current?.pause()} disabled={!mediaAsset || mediaAsset.kind !== "video"}>Play / Pause</button><button onClick={() => { if (videoRef.current) { videoRef.current.currentTime = 0; void videoRef.current.play(); } }} disabled={!mediaAsset || mediaAsset.kind !== "video"}>Replay</button><button onClick={captureFrame} disabled={!mediaAsset || mediaAsset.kind !== "video"}>Capture frame</button><button onClick={() => void videoRef.current?.requestFullscreen()} disabled={!mediaAsset}>Enlarge</button><label>Speed<select aria-label="Playback speed" value={speed} onChange={(event) => { setSpeed(event.target.value); if (videoRef.current) videoRef.current.playbackRate = Number(event.target.value); }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label></div>
     {mismatch && <div className="inline-warning amber">Media metadata does not match the active {exam.side} {exam.gland} examination. Confirm identity before reporting.</div>}
     <div className="slot-selector"><div><span>Demo clip</span><select aria-label="Select demo clip" value={selected.id} onChange={(event) => onSession({ ...session, selectedMediaSlot: event.target.value, comparisonMode: false })}>{slots.map((slot) => <option key={slot.id} value={slot.id}>{slot.label}</option>)}</select></div><label className="upload-button">Upload video<input aria-label="Upload ultrasound video" hidden type="file" accept="video/*,.mov" onChange={(event) => void importMedia(event.target.files?.[0], "video")} /></label><label className="upload-button secondary">Upload image<input aria-label="Upload ultrasound image" hidden type="file" accept="image/png,image/jpeg" onChange={(event) => void importMedia(event.target.files?.[0], "image")} /></label>{uploaded && <button className="text-button" onClick={() => { if (uploaded.objectUrl) URL.revokeObjectURL(uploaded.url); const next = { ...exam.ultrasoundUploads }; delete next[selected.id]; if (demoCase.id === "case-01" && supportsPrivateMediaStorage()) void removeStoredPrivateMedia("case-01", selected.id); onExam({ ...exam, ultrasoundUploads: next, reviewed: { ...exam.reviewed, ultrasound: false }, clinicianVerified: { ...exam.clinicianVerified, ultrasound: false } }); }}>Remove local file</button>}</div>
-    <p className="media-note">Slot ID: <code>{selected.id}</code>. Selected files remain in browser memory for this tab only and retain their original aspect ratio.</p>
+    <p className="media-note">Slot ID: <code>{selected.id}</code>. {mediaAsset?.storage === "built-in" ? "Built-in Clinical Demo Media is served from this protected Preview." : "Replacement media remain in browser memory and are not uploaded."} Original aspect ratio is preserved.</p>
   </div><AnalysisPanel title="Ultrasound educational analysis" demoCase={demoCase} modality="ultrasound" verified={Boolean(exam.clinicianVerified.ultrasound)} reviewed={Boolean(exam.reviewed.ultrasound)} onReview={() => onExam({ ...exam, reviewed: { ...exam.reviewed, ultrasound: true } })} onVerify={() => onExam({ ...exam, clinicianVerified: { ...exam.clinicianVerified, ultrasound: true }, reviewed: { ...exam.reviewed, ultrasound: true } })} />
   </div>;
 }
@@ -237,7 +242,8 @@ function CaseTwoUltrasoundWorkspace({ demoCase, session, exam, onSession }: { de
       if (cancelled) return;
       setStoredVideoAvailable(Boolean(stored));
       setPersistOnDevice(Boolean(stored));
-      if (stored && !sessionRef.current.exams.some((item) => item.ultrasoundUploads[caseTwoCompositeId])) {
+      const hasReplacement = sessionRef.current.exams.some((item) => Boolean(item.ultrasoundUploads[caseTwoCompositeId] && item.ultrasoundUploads[caseTwoCompositeId]?.storage !== "built-in"));
+      if (stored && !hasReplacement) {
         setPrivateMediaConsent("case-02", true);
         attachComposite(stored.blob, stored.name, "device", stored);
       } else {
@@ -283,12 +289,8 @@ function CaseTwoUltrasoundWorkspace({ demoCase, session, exam, onSession }: { de
     const current = sessionRef.current;
     const previous = current.exams.map((item) => item.ultrasoundUploads[caseTwoCompositeId]).find(Boolean);
     if (previous?.objectUrl) URL.revokeObjectURL(previous.url);
-    const exams = current.exams.map((item) => {
-      const ultrasoundUploads = { ...item.ultrasoundUploads };
-      delete ultrasoundUploads[caseTwoCompositeId];
-      for (const id of caseTwoLegacyIds) delete ultrasoundUploads[id];
-      return { ...item, ultrasoundUploads, reviewed: { ...item.reviewed, ultrasound: false }, clinicianVerified: { ...item.clinicianVerified, ultrasound: false } };
-    });
+    const builtIn = builtInMediaForCase("case-02");
+    const exams = current.exams.map((item) => ({ ...item, ultrasoundUploads: { ...item.ultrasoundUploads, ...builtIn.ultrasoundUploads }, reviewed: { ...item.reviewed, ultrasound: false }, clinicianVerified: { ...item.clinicianVerified, ultrasound: false } }));
     onSession({ ...current, exams, fusionGenerated: false, fusionReviewed: false, fusionImpression: "" });
     setStorageState(storedVideoAvailable ? "stored" : "session");
   }
@@ -311,10 +313,10 @@ function CaseTwoUltrasoundWorkspace({ demoCase, session, exam, onSession }: { de
   }
 
   async function clearPrivateMedia() {
-    if (!asset && !storedVideoAvailable) return;
-    if (!window.confirm("Clear the Case 2 video from this session and browser-local storage?")) return;
+    if (asset?.storage === "built-in" && !storedVideoAvailable) return;
+    if (!window.confirm("Clear the Case 2 replacement and restore the built-in composite video?")) return;
     try {
-      if (supportsPrivateMediaStorage()) await clearPrivateMediaStorage();
+      if (supportsPrivateMediaStorage()) await removeStoredCaseTwoVideo();
       setStoredVideoAvailable(false);
       setPersistOnDevice(false);
       removeCompositeFromSession();
@@ -324,7 +326,7 @@ function CaseTwoUltrasoundWorkspace({ demoCase, session, exam, onSession }: { de
   }
 
   async function exportBundle() {
-    if (!asset) return;
+    if (!asset || asset.storage === "built-in") return;
     try {
       const blob = await (await fetch(asset.url)).blob();
       const item: PrivateMediaBundleItem = { slot: caseTwoCompositeId, blob, name: asset.name, type: asset.type || blob.type || "application/octet-stream", lastModified: asset.lastModified ?? Date.now() };
@@ -346,7 +348,7 @@ function CaseTwoUltrasoundWorkspace({ demoCase, session, exam, onSession }: { de
 
   async function setCompositePersistence(consented: boolean) {
     setPersistOnDevice(consented); setPrivateMediaConsent("case-02", consented);
-    if (!consented || !asset || !supportsPrivateMediaStorage()) return;
+    if (!consented || !asset || asset.storage === "built-in" || !supportsPrivateMediaStorage()) return;
     try {
       const blob = await (await fetch(asset.url)).blob();
       await storeCaseTwoVideo(blob, { name: asset.name, type: asset.type || blob.type, lastModified: asset.lastModified });
@@ -370,10 +372,11 @@ function CaseTwoUltrasoundWorkspace({ demoCase, session, exam, onSession }: { de
     const link = document.createElement("a"); link.href = canvas.toDataURL("image/png"); link.download = `case-02-${view}-representative-frame.png`; link.click();
   }
 
-  const persistenceMessage = storageState === "stored" ? "Stored only in this authorized browser and restored automatically on later visits." : storageState === "unavailable" ? "Persistent browser storage is unavailable; the video remains session-only and must be reloaded after refresh." : storageState === "error" ? "Browser-local persistence was unavailable or denied; the current video remains session-only." : "Session-only unless optional device persistence is selected.";
+  const usingBuiltIn = asset?.storage === "built-in";
+  const persistenceMessage = usingBuiltIn ? "The owner-authorized built-in video is served from this protected Preview and remains available after refresh." : storageState === "stored" ? "The replacement is stored only in this authorized browser and restored automatically on later visits." : storageState === "unavailable" ? "Persistent browser storage is unavailable; the replacement remains session-only." : storageState === "error" ? "Browser-local persistence was unavailable or denied; the replacement remains session-only." : "The replacement is session-only unless optional device persistence is selected.";
 
   return <div className="modality-workspace case-two-ultrasound"><div className="viewer-column">
-    <section className="case-two-local-loader" aria-label="Case 2 browser-local media import"><div><span>Private composite review</span><h2>Case 2 — Bilateral Parotid Ultrasound Comparison</h2><p>Load the single original four-panel MOV. One browser-local source supplies the complete view and all four mapped quadrants. It is never sent to a server, remote API, cloud storage, or analytics service.</p></div><label className={`case-two-video-input ${asset ? "loaded" : ""}`}><strong>{asset ? "Replace Video" : "Load Case 2 Video"}</strong><span>{asset?.name || "Choose the composite MOV from this device"}</span><input type="file" accept="video/*,.mov" aria-label="Load Case 2 Video" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void loadComposite(file); }} /></label><div className="case-two-private-actions"><label className="case-two-persistence-consent"><input type="checkbox" checked={persistOnDevice} disabled={!supportsPrivateMediaStorage()} onChange={(event) => void setCompositePersistence(event.target.checked)} />Remember this video on this device</label><button disabled={!asset} onClick={() => void exportBundle()}>Export Private Case Media</button><label className="private-media-import">Import Private Case Media<input hidden type="file" accept=".salifusion-media,application/vnd.salifusion.private-media" aria-label="Import Case 2 private media bundle" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void importBundle(file); }} /></label><button disabled={!storedVideoAvailable} onClick={() => void removeStoredVideo()}>Remove Stored Video</button><button disabled={!asset && !storedVideoAvailable} onClick={() => void clearPrivateMedia()}>Clear Private Media</button></div><div className={`case-two-load-status ${asset ? "loaded" : "pending"}`} role="status"><b>{asset ? "Video loaded" : storedVideoAvailable ? "Stored video available" : "Video not loaded"}</b><span>{persistenceMessage} Preview origins are isolated; use the local export/import bundle when moving to a new Preview.</span>{transferMessage && <small>{transferMessage}</small>}</div></section>
+    <section className="case-two-local-loader" aria-label="Case 2 built-in and browser-local media"><div><span>Built-in Clinical Demo Media</span><h2>Case 2 — Bilateral Parotid Ultrasound Comparison</h2><p>The single owner-authorized, de-identified composite video is preloaded and supplies the complete view plus all four mapped quadrants. Optional replacements are processed only in this browser and are never sent to a server, remote API, cloud storage, or analytics service.</p></div><label className={`case-two-video-input ${asset ? "loaded" : ""}`}><strong>{asset ? "Replace Video" : "Load Case 2 Video"}</strong><span>{asset?.name || "Choose the composite MOV from this device"}</span><input type="file" accept="video/*,.mov" aria-label="Load Case 2 Video" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void loadComposite(file); }} /></label><div className="case-two-private-actions"><label className="case-two-persistence-consent"><input type="checkbox" aria-label="Remember this video on this device" checked={usingBuiltIn ? false : persistOnDevice} disabled={usingBuiltIn || !supportsPrivateMediaStorage()} onChange={(event) => void setCompositePersistence(event.target.checked)} />Remember replacement on this device</label><button disabled={!asset || usingBuiltIn} onClick={() => void exportBundle()}>Export Private Case Media</button><label className="private-media-import">Import Private Case Media<input hidden type="file" accept=".salifusion-media,application/vnd.salifusion.private-media" aria-label="Import Case 2 private media bundle" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void importBundle(file); }} /></label><button disabled={!storedVideoAvailable} onClick={() => void removeStoredVideo()}>Remove Stored Video</button><button disabled={usingBuiltIn && !storedVideoAvailable} onClick={() => void clearPrivateMedia()}>Restore Built-in Video</button></div><div className={`case-two-load-status ${asset ? "loaded" : "pending"}`} role="status"><b>{usingBuiltIn ? "Built-in video ready" : asset ? "Video loaded" : storedVideoAvailable ? "Stored video available" : "Video not loaded"}</b><span>{persistenceMessage} The built-in source returns whenever this demonstration is reset.</span>{transferMessage && <small>{transferMessage}</small>}</div></section>
     <div className="case-two-info-bar"><b>Case 02 | Bilateral Parotid Comparison | B-mode + Doppler</b><span>Right: Reference Gland</span><span>Left: Symptomatic Gland</span></div>
     <div className="case-two-view-tabs" role="tablist" aria-label="Composite ultrasound panel navigation">{caseTwoViews.map((item) => <button key={item.id} role="tab" aria-selected={view === item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><b>{item.label}</b><small>{item.detail}</small></button>)}</div>
     <div ref={stageRef} className={`case-two-composite-stage region-${activeView.region}`} data-testid="case-two-composite-stage">
@@ -408,7 +411,7 @@ function PhaseCard({ fixture, asset, onImport, onRemove }: { fixture: Sialograph
   const previewRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
   const reset = () => setView({ scale: 1, x: 0, y: 0 });
-  const status = asset ? "Available" : fixture.availability === "not-provided" ? "Not Provided" : "Awaiting image";
+  const status = asset?.storage === "built-in" ? "Built-in" : asset ? "Available" : fixture.availability === "not-provided" ? "Not Provided" : "Awaiting image";
   function pointerDown(event: React.PointerEvent<HTMLDivElement>) { if (!asset) return; drag.current = { x: event.clientX, y: event.clientY, originX: view.x, originY: view.y }; event.currentTarget.setPointerCapture(event.pointerId); }
   function pointerMove(event: React.PointerEvent<HTMLDivElement>) { if (!drag.current) return; setView((current) => ({ ...current, x: drag.current!.originX + event.clientX - drag.current!.x, y: drag.current!.originY + event.clientY - drag.current!.y })); }
   return <article className={asset ? "phase-card available" : "phase-card"}>

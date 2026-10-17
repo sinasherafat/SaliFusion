@@ -79,7 +79,7 @@ function addOpening(layout: Layout, input: CompetitionReportInput) {
   wrap(reportTitle(input), RIGHT - LEFT - 36, 10.2).slice(0, 2).forEach((row, index) => layout.page.commands.push(text(row, LEFT + 18, 705 - index * 12, 10.2, "F2", color.teal)));
   layout.y = 660;
   layout.paragraph(`Case ${input.demoCase.number}`, { size: 12, font: "F2", color: color.teal, gap: 2 });
-  layout.paragraph(input.demoCase.id === "case-02" ? "Acute Left Parotitis" : input.demoCase.id === "case-01" ? "Left Submandibular Sialolithiasis with Obstructive Ductal Disease" : input.demoCase.title, { size: 17, font: "F2", gap: 14 });
+  layout.paragraph(input.demoCase.id === "case-02" ? "Acute Left Parotitis" : input.demoCase.id === "case-01" ? "Left Submandibular Sialolithiasis with Complex Obstructive Ductal Disease" : input.demoCase.title, { size: 17, font: "F2", gap: 14 });
   const modalities = input.demoCase.id === "case-02" ? "B-mode + Doppler Imaging" : modalitiesFor(input).map(modalityLabel).join(", ");
   const reviewStatus = input.reportReviewed ? "Clinician reviewed educational report" : input.media?.length ? "Educational draft - not yet clinician reviewed" : "Educational draft - image verification has not occurred";
   const fields = [
@@ -204,12 +204,13 @@ function headerFooter(pageNumber: number, pageCount: number, input: CompetitionR
 
 export function createCompetitionPdf(input: CompetitionReportInput): Uint8Array {
   const layout = new Layout(); addOpening(layout, input);
+  const usesBuiltInMedia = Object.values(input.exam.ultrasoundUploads).some((asset) => asset?.storage === "built-in") || Object.values(input.exam.phaseUploads).some((asset) => asset?.storage === "built-in");
   layout.heading("Relevant Clinical History"); layout.paragraph(input.demoCase.id === "case-02" ? caseTwoHistory(input.history) : input.demoCase.clinicalSummary);
-  if (input.demoCase.id === "case-02") { layout.heading("Data Provenance"); layout.paragraph("Clinical media were read from a browser-local object URL, optionally restored from consented on-device IndexedDB storage, and embedded client-side. Curated educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
+  if (input.demoCase.id === "case-02") { layout.heading("Data Provenance"); layout.paragraph(usesBuiltInMedia ? "Owner-authorized, de-identified Built-in Clinical Demo Media were loaded from this protected Preview and processed client-side for the report. Curated educational references remain distinct from clinician-confirmed observations. No automated image inference or clinically validated performance is claimed." : "Replacement clinical media were read from a browser-local object URL, optionally restored from consented on-device IndexedDB storage, and embedded client-side. Curated educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
   const modalities = modalitiesFor(input);
   for (const modality of modalities) addModality(layout, input, modality);
   if (input.kind === "fusion" || input.kind === "complete") addFusion(layout, input);
-  if (input.demoCase.id !== "case-02") { layout.heading("Data Provenance"); layout.paragraph("Clinical media were read from browser-local object URLs, optionally restored from explicitly consented on-device IndexedDB storage, and embedded client-side. Preset educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
+  if (input.demoCase.id !== "case-02") { layout.heading("Data Provenance"); layout.paragraph(usesBuiltInMedia ? "Owner-authorized, de-identified Built-in Clinical Demo Media were loaded from this protected Preview and processed client-side for the report. Preset educational references remain distinct from clinician-confirmed observations. No automated image inference or clinically validated performance is claimed." : "Replacement clinical media were read from browser-local object URLs, optionally restored from explicitly consented on-device IndexedDB storage, and embedded client-side. Preset educational references remain distinct from clinician-confirmed observations. No automated analysis of arbitrary uploads or clinically validated performance is claimed.", { size: 8.8, color: color.muted }); }
   addMediaPages(layout, input);
 
   let nextId = 6;

@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { COMPETITION_CASES, getCompetitionCase } from "@/data/competition-cases";
-import { mediaSlotsForCase } from "@/data/demo-media";
+import { builtInMediaForCase, mediaSlotsForCase } from "@/data/demo-media";
 import { HistoryStep } from "@/components/competition/history-step";
 import { ImagingStep } from "@/components/competition/imaging-step";
 import { PdfPreviewDialog } from "@/components/competition/pdf-preview-dialog";
@@ -16,12 +16,13 @@ import { WORKFLOW_STEPS } from "@/types/competition";
 type Screen = "landing" | "cases" | "workflow";
 type PdfPreview = { kind: CompetitionReportInput["kind"]; title: string; url: string; fileName: string; warnings: string[] };
 
-const caseOneFusionDraft = "Combined ultrasound and sialographic findings are consistent with left submandibular sialolithiasis associated with obstructive ductal abnormalities. Additional sialographic findings may indicate ductal stricturing, peripheral sialectasis, and chronic inflammatory ductal involvement, subject to confirmation on the supplied images.";
+const caseOneFusionDraft = "Left Submandibular Sialolithiasis with Chronic Obstructive Ductal Disease and Impaired Ductal Evacuation. Combined ultrasound and four-phase sialographic findings support a left submandibular calculus with obstructive ductal abnormalities. Persistent contrast retention at five minutes indicates delayed evacuation and suggests impaired ductal drainage in the setting of chronic obstruction.";
 const caseTwoFusionDraft = "Comparative B-mode ultrasound and Doppler findings, in conjunction with acute unilateral painful swelling and erythema, are most suggestive of acute inflammatory involvement of the left parotid gland. Multiple rounded hypoechoic areas and increased Doppler vascular signals are present in the symptomatic gland. The contralateral right parotid demonstrates comparatively preserved morphology and less prominent vascularity. Autoimmune-related inflammatory changes remain a less favored differential consideration.";
 const caseTwoCompositeId = "case-02-bilateral-parotid-composite-ultrasound";
 
 function makeExam(demoCase: CompetitionCase, side: "left" | "right", suffix = "primary"): GlandExam {
-  return { id: `${demoCase.id}-${side}-${suffix}`, gland: demoCase.history.gland, side, reviewed: {}, clinicianVerified: {}, ultrasoundUploads: {}, phaseUploads: {}, cbctImages: [], dicomSeries: [], selectedSeriesUid: "", dicomError: "" };
+  const media = builtInMediaForCase(demoCase.id);
+  return { id: `${demoCase.id}-${side}-${suffix}`, gland: demoCase.history.gland, side, reviewed: {}, clinicianVerified: {}, ultrasoundUploads: media.ultrasoundUploads, phaseUploads: media.phaseUploads, cbctImages: [], dicomSeries: [], selectedSeriesUid: "", dicomError: "" };
 }
 
 function createSession(demoCase: CompetitionCase): CaseSession {
@@ -91,7 +92,7 @@ export function SaliFusionApp() {
       {session.step === "history" && <HistoryStep demoCase={demoCase} history={session.history} onChange={(history) => updateSession({ ...session, history, exams: session.exams.map((item, index) => index === 0 ? { ...item, gland: history.gland, side: history.laterality === "right" ? "right" : "left" } : item) })} />}
       {session.step === "imaging" && <ImagingStep demoCase={demoCase} session={session} exam={exam} onSession={updateSession} onExam={updateExam} onAddExam={addExam} onRemoveExam={removeExam} />}
       {session.step === "reports" && <ModalityReportsStep demoCase={demoCase} session={session} exam={exam} onPreview={previewPdf} onDownload={downloadPdf} onOpenImaging={openImaging} actionState={reportAction} buildPdf={buildPdf} />}
-      {session.step === "fusion" && <FusionStep demoCase={demoCase} session={session} exam={exam} onGenerate={() => patchSession({ fusionGenerated: true, fusionImpression: session.fusionImpression || (demoCase.id === "case-01" ? caseOneFusionDraft : demoCase.id === "case-02" ? caseTwoFusionDraft : demoCase.fusion.interpretation), fusionReviewed: false })} onImpressionChange={(fusionImpression) => patchSession({ fusionImpression, fusionReviewed: false })} onReviewed={() => patchSession({ fusionReviewed: true })} onPreview={previewPdf} onDownload={downloadPdf} actionState={reportAction} buildPdf={buildPdf} />}
+      {session.step === "fusion" && <FusionStep demoCase={demoCase} session={session} exam={exam} onGenerate={() => patchSession({ fusionGenerated: true, fusionImpression: session.fusionImpression || (demoCase.id === "case-01" ? caseOneFusionDraft : demoCase.id === "case-02" ? caseTwoFusionDraft : demoCase.fusion.interpretation), fusionReviewed: false })} onImpressionChange={(fusionImpression) => patchSession({ fusionImpression, fusionReviewed: false })} onReviewed={() => patchSession({ fusionReviewed: true })} onOpenImaging={openImaging} onPreview={previewPdf} onDownload={downloadPdf} actionState={reportAction} buildPdf={buildPdf} />}
       {session.step === "final" && <FinalReportStep demoCase={demoCase} session={session} exam={exam} onPreview={previewPdf} onDownload={downloadPdf} actionState={reportAction} buildPdf={buildPdf} />}
     </main>
     <footer className="workflow-footer"><div>{stepIndex > 0 && <button className="back-button" onClick={() => move(-1)}>← Back</button>}</div><span>Case data is isolated in this browser session.</span><div>{stepIndex < WORKFLOW_STEPS.length - 1 ? <button className="continue-button" onClick={() => move(1)}>Continue to {WORKFLOW_STEPS[stepIndex + 1].label} →</button> : <button className="continue-button" onClick={() => setScreen("cases")}>Finish case</button>}</div></footer>
