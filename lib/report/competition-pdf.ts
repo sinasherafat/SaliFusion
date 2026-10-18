@@ -67,7 +67,7 @@ class Layout {
   labelValue(label: string, value: string) { this.ensure(28); this.page.commands.push(text(label.toUpperCase(), LEFT, this.y, 7.5, "F2", color.muted)); this.y -= 12; this.paragraph(value, { size: 9.3, gap: 7 }); }
 }
 
-function reportTitle(input: CompetitionReportInput) { if (input.demoCase.id === "case-02") return input.kind === "complete" ? "Case 02 - Complete Imaging Report" : input.kind === "fusion" ? "Case 02 - Integrated Clinical and Ultrasound Assessment" : "Case 02 - Bilateral Parotid Ultrasound and Doppler Examination"; const kind = input.kind; return kind === "complete" ? "Complete Case Report" : kind === "fusion" ? "Integrated Multimodal Fusion Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "cbct" ? "CBCT Report" : "Ultrasound Report"; }
+function reportTitle(input: CompetitionReportInput) { if (input.demoCase.id === "case-02") return input.kind === "complete" ? "Case 02 - Complete Imaging Report" : input.kind === "fusion" ? "Case 02 - Integrated Clinical and Ultrasound Assessment" : "Case 02 - Bilateral Parotid Ultrasound and Doppler Examination"; if (input.demoCase.id === "case-04") return input.kind === "complete" ? "Case 04 - Complete Imaging Report" : input.kind === "fusion" ? "Case 04 - Integrated Available-Evidence Assessment" : input.kind === "sialography" ? "Case 04 - Four-Phase Sialography Report" : input.kind === "ultrasound" ? "Case 04 - Ultrasound Not Performed / Not Provided" : "Case 04 - CBCT Report"; const kind = input.kind; return kind === "complete" ? "Complete Case Report" : kind === "fusion" ? "Integrated Multimodal Fusion Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "cbct" ? "CBCT Report" : "Ultrasound Report"; }
 function modalitiesFor(input: CompetitionReportInput) { return input.kind === "fusion" || input.kind === "complete" ? input.includedModalities : [input.kind as ClinicalModality]; }
 function modalityLabel(modality: ClinicalModality) { return modality === "sialography" ? "Four-Phase Sialography" : modality === "cbct" ? "CBCT" : "Ultrasound B-mode"; }
 function caseTwoHistory(history: HistoryAnswers) { const parts = [`${history.symptomDuration || "Duration not documented"} ${history.onset || "unknown-onset"} ${history.laterality} ${history.gland} swelling`, `pain ${history.pain}`, `erythema/local warmth ${history.rednessWarmth}`, `purulent discharge ${history.purulentDischarge}`, `xerostomia ${history.xerostomia}`, `xerophthalmia ${history.xerophthalmia}`, `fever ${history.fever}`]; return parts.join("; ") + "."; }
@@ -157,6 +157,23 @@ function addFusion(layout: Layout, input: CompetitionReportInput) {
     layout.heading("Educational Decision Support"); layout.paragraph(SCORE_DISCLAIMER, { size: 8.6, color: color.muted });
     return;
   }
+  if (input.demoCase.id === "case-04") {
+    const impression = input.fusionImpression || input.demoCase.fusion.interpretation;
+    layout.heading("Integrated Available-Evidence Assessment");
+    layout.labelValue("Assessment basis", "Reviewed four-phase left submandibular sialography. Baseline ultrasound was not performed or provided and is not required for this report.");
+    layout.labelValue("Clinical history", input.demoCase.clinicalSummary);
+    layout.labelValue("Scout / precontrast", input.demoCase.sialographyPhases.precontrast.interpretation);
+    layout.labelValue("Ductal filling", input.demoCase.sialographyPhases.ductal.interpretation);
+    layout.labelValue("Acinar / parenchymal filling", input.demoCase.sialographyPhases.acinar.interpretation);
+    layout.labelValue("Evacuation and drainage", input.demoCase.sialographyPhases.evacuation.interpretation);
+    layout.heading("Final Imaging Impression"); layout.paragraph(impression, { size: 11, font: "F2" });
+    layout.heading("Differential Diagnoses"); layout.list(input.demoCase.fusion.differentials.map((item) => `${item.label}: ${item.rationale}`));
+    layout.heading("Optional Adjunctive Ultrasound"); layout.paragraph(input.demoCase.ultrasound.interpretation); layout.list(input.demoCase.ultrasound.recommendations);
+    layout.heading("Clinical Recommendations"); layout.list(input.demoCase.fusion.recommendations);
+    layout.heading("Limitations"); layout.list(input.demoCase.fusion.limitations);
+    layout.heading("Educational Decision Support"); layout.paragraph(SCORE_DISCLAIMER, { size: 8.6, color: color.muted });
+    return;
+  }
   const impression = input.fusionImpression || input.demoCase.fusion.interpretation;
   layout.heading("Integrated Multimodal Assessment");
   layout.labelValue("Clinical history", input.demoCase.clinicalSummary);
@@ -206,7 +223,7 @@ function addMediaPages(layout: Layout, input: CompetitionReportInput) {
 }
 
 function headerFooter(pageNumber: number, pageCount: number, input: CompetitionReportInput) {
-  const footerTitle = input.demoCase.id === "case-02" ? input.kind === "ultrasound" ? "Bilateral Parotid US Report" : input.kind === "fusion" ? "Integrated Clinical-US Report" : "Case 02 Complete Report" : reportTitle(input).slice(0, 34);
+  const footerTitle = input.demoCase.id === "case-02" ? input.kind === "ultrasound" ? "Bilateral Parotid US Report" : input.kind === "fusion" ? "Integrated Clinical-US Report" : "Case 02 Complete Report" : input.demoCase.id === "case-04" ? input.kind === "sialography" ? "Four-Phase Sialography" : input.kind === "fusion" ? "Integrated Assessment" : input.kind === "complete" ? "Complete Case Report" : reportTitle(input).slice(0, 34) : reportTitle(input).slice(0, 34);
   return [
     text("SaliFusion", LEFT, 814, 13, "F2", color.teal),
     text("AI-Assisted Salivary Gland Imaging and Diagnostic Decision Support", LEFT + 77, 814, 7.8, "F1", color.muted),

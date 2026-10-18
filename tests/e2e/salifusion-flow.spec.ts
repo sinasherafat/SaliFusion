@@ -396,17 +396,49 @@ test("case three preloads right-sided media and completes modality, fusion, and 
   expect(writes).toEqual([]);
 });
 
-test("case four starts with an independent sialography pathway and reports five-minute delayed clearance", async ({ page }) => {
+test("case four preloads four sialography phases and completes reports without ultrasound", async ({ page }) => {
+  test.setTimeout(180_000);
+  const writes: string[] = []; page.on("request", (request) => { if (["POST", "PUT", "PATCH"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`); });
+  const previewPdf = async (scope: import("@playwright/test").Locator, dialogName: string) => {
+    await scope.getByRole("button", { name: "View PDF", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: dialogName });
+    await expect(dialog.getByText("Preview Ready")).toBeVisible(); await expect(dialog.locator("canvas").first()).toBeVisible();
+    await dialog.getByRole("button", { name: "Close PDF preview" }).click();
+  };
+  const downloadAndInspect = async (scope: import("@playwright/test").Locator, expectedName: RegExp, buttonName = "Download PDF") => {
+    const downloadPromise = page.waitForEvent("download"); await scope.getByRole("button", { name: buttonName, exact: true }).click();
+    const download = await downloadPromise; expect(download.suggestedFilename()).toMatch(expectedName); const path = await download.path(); expect(path).toBeTruthy();
+    const source = (await readFile(path!)).toString("latin1"); expect(source.startsWith("%PDF-1.4")).toBe(true); expect((source.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(4); expect(source).toContain("10 minutes"); expect(source).not.toMatch(/five minutes/i);
+    if (process.env.PDF_QA_DIR) { await mkdir(process.env.PDF_QA_DIR, { recursive: true }); await copyFile(path!, join(process.env.PDF_QA_DIR, download.suggestedFilename())); }
+  };
+
   await enterDemo(page);
   await page.locator(".case-card").nth(3).getByRole("button", { name: /Start Case/ }).click();
+  await expect(page.getByLabel("Affected gland")).toHaveValue("submandibular"); await expect(page.getByLabel("Laterality")).toHaveValue("left");
+  await expect(page.getByRole("group", { name: "Xerostomia" }).getByRole("button", { name: "Yes", exact: true })).toHaveClass(/selected/);
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
   await expect(page.getByRole("tab", { name: /2D Sialography/ })).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".phase-card")).toHaveCount(4);
-  await page.getByText(/Phase-specific interpretation · Five minutes/).click();
-  await expect(page.getByText(/Incomplete contrast evacuation at five minutes/)).toBeVisible();
-  await page.getByRole("button", { name: "Review educational reference findings" }).click();
+  await expect(page.locator(".phase-card img")).toHaveCount(4);
+  await expect.poll(() => page.locator(".phase-card img").evaluateAll((images: HTMLImageElement[]) => images.every((image) => image.src.includes("/demo-cases/case-04/") && image.naturalWidth > 0 && image.naturalHeight > 0))).toBe(true);
+  await page.getByText(/Phase-specific interpretation · 10 minutes/).click();
+  await expect(page.getByText(/Incomplete contrast evacuation with persistent intraglandular and ductal contrast retention is observed at 10 minutes/)).toBeVisible();
+  await page.getByRole("button", { name: "Review educational reference findings" }).click(); await expect(page.getByText(/Radiolucent filling defect within the main duct/)).toBeVisible(); await page.getByRole("button", { name: "Confirm clinician review" }).click();
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
-  await expect(page.getByText("Educational reference reviewed").first()).toBeVisible();
+  const ultrasoundCard = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Ultrasound", exact: true }) });
+  await expect(ultrasoundCard).toContainText("Not Performed / Not Provided"); await expect(ultrasoundCard).toContainText("not required");
+  const sialographyCard = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: /Left Submandibular Four-Phase Sialography Report/ }) });
+  await expect(sialographyCard).toContainText("Clinician Reviewed"); await previewPdf(sialographyCard, "Left Submandibular Four-Phase Sialography Report"); await downloadAndInspect(sialographyCard, /SaliFusion_Case04_Sialography_Report\.pdf/);
+  await page.getByRole("button", { name: /Continue to Fusion/ }).click();
+  await expect(page.getByRole("button", { name: "Generate Integrated Assessment" })).toBeEnabled(); await page.getByRole("button", { name: "Generate Integrated Assessment" }).click();
+  await expect(page.getByText(/Integrated review of the available sialographic evidence demonstrates a left submandibular obstructive ductal process/)).toBeVisible();
+  await expect(page.getByText(/Ultrasound is complementary, not mandatory/)).toBeVisible();
+  const fusionActions = page.locator(".fusion-pdf-actions"); await fusionActions.getByRole("button", { name: "View Integrated PDF" }).click(); const fusionDialog = page.getByRole("dialog", { name: "Integrated Available-Evidence Assessment" }); await expect(fusionDialog.getByText("Preview Ready")).toBeVisible(); await fusionDialog.getByRole("button", { name: "Close PDF preview" }).click();
+  await downloadAndInspect(fusionActions, /SaliFusion_Case04_Integrated_Assessment_Report\.pdf/, "Download Integrated PDF");
+  await page.getByRole("button", { name: "Mark Reviewed" }).click(); await page.getByRole("button", { name: /Continue to Final Report/ }).click();
+  const completeCard = page.locator(".report-center-grid article").filter({ has: page.getByRole("heading", { name: "Complete Case Report" }) });
+  await expect(completeCard).toContainText("Available"); await previewPdf(completeCard, "Case 04 Complete Imaging Report"); await downloadAndInspect(completeCard, /SaliFusion_Case04_Complete_Case_Report\.pdf/);
+  await expect(page.getByText(/Ultrasound was not performed or provided/)).toBeVisible();
+  expect(writes).toEqual([]);
 });
 
 test("case five preserves right submandibular identity, not-provided scout, and ultrasound/MRI recommendations", async ({ page }) => {
