@@ -82,9 +82,11 @@ describe("independent four-phase sialography source of truth", () => {
     expect(item.sialographyPhases.ductal.interpretation).toMatch(/right Stensen duct.*normal in caliber and course/i);
     expect(item.sialographyPhases.acinar.findings.join(" ")).toMatch(/punctate sialectatic.*Leafless blossoming tree/i);
     expect(item.evacuationTimeMinutes).toBe(10);
-    expect(item.sialographyPhases.evacuation.timing).toMatch(/10 minutes/i);
-    expect(item.sialographyPhases.evacuation.interpretation).toMatch(/delayed salivary clearance.*functional gland impairment/i);
-    expect(item.sialography.limitations.join(" ")).toMatch(/brief specifies five minutes.*burned-in 10-minute label/i);
+    expect(item.sialographyPhases.evacuation.timing).toBe("10 minutes");
+    expect(item.sialographyPhases.evacuation.interpretation).toMatch(/Persistent intraglandular contrast retention.*incomplete contrast evacuation.*10 minutes.*delayed ductal clearance.*impaired glandular drainage function/i);
+    expect(item.sialography.interpretation).toMatch(/Persistent contrast retention at 10 minutes.*delayed evacuation.*impaired glandular drainage/i);
+    expect(item.fusion.interpretation).toMatch(/incomplete contrast evacuation at 10 minutes.*favor Sjögren syndrome.*leading diagnostic consideration/i);
+    expect([...item.sialography.limitations, ...item.fusion.limitations, ...item.sialographyPhases.evacuation.limitations].join(" ")).not.toMatch(/brief|discrepancy|conflict|corrected media|timing confirmation/i);
   });
 
   it("supports Case 4 as sialography-only with negative scout, positive filling defect, and five-minute delay", () => {
@@ -195,10 +197,12 @@ describe("fusion, provenance, and reports", () => {
     const text = new TextDecoder().decode(bytes);
     expect(text.startsWith("%PDF-1.4")).toBe(true);
     expect(text).toContain("right parotid");
-    if (kind !== "ultrasound") expect(text).toMatch(/source image labeled 10 minutes|visibly labeled 10 minutes/i);
+    if (kind !== "ultrasound") expect(text).toContain("10 minutes");
+    expect(text).not.toMatch(/Source Timing (?:Discrepancy|Limitation)|task brief|separate task brief|five-minute claim|corrected source media|timing confirmation|conflicting five-minute/i);
     if (kind === "fusion" || kind === "complete") {
-      expect(text).toContain("substantially");
-      expect(text).toContain("increasing suspicion for early Sjogren syndrome");
+      expect(text).toContain("these findings favor Sjogren");
+      expect(text).toContain("syndrome as the leading diagnostic consideration");
+      expect(text).toContain("incomplete contrast evacuation at 10");
     }
   });
 });

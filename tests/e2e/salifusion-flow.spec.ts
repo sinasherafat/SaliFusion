@@ -347,7 +347,8 @@ test("case three preloads right-sided media and completes modality, fusion, and 
       expect(source).toContain("Subtle nonspecific right parotid parenchymal heterogeneity");
       expect(source).not.toContain("Four-Phase Sialography Image Review");
     }
-    if (expectedImages > 1) expect(source).toMatch(/source image labeled 10 minutes|visibly labeled 10 minutes/i);
+    if (expectedImages > 1) expect(source).toContain("10 minutes");
+    expect(source).not.toMatch(/Source Timing (?:Discrepancy|Limitation)|task brief|separate task brief|five-minute claim|corrected source media|timing confirmation|conflicting five-minute/i);
     if (process.env.PDF_QA_DIR) { await mkdir(process.env.PDF_QA_DIR, { recursive: true }); await copyFile(path!, join(process.env.PDF_QA_DIR, archiveName)); }
   };
   const previewPdf = async (scope: import("@playwright/test").Locator, buttonName: string, dialogName: string) => {
@@ -375,8 +376,9 @@ test("case three preloads right-sided media and completes modality, fusion, and 
   await expect(page.getByText("Selective ductal assessment only")).toBeVisible();
   await expect(page.locator(".phase-card img")).toHaveCount(4);
   await expect.poll(() => page.locator(".phase-card img").evaluateAll((images: HTMLImageElement[]) => images.every((image) => image.src.includes("/demo-cases/case-03/") && image.naturalWidth > 800 && image.naturalHeight > 700))).toBe(true);
-  await page.getByText(/Phase-specific interpretation · Source image label: 10 minutes/).click();
-  await expect(page.getByText(/brief states five minutes, but the supplied image visibly states 10 minutes/)).toBeVisible();
+  await page.getByText(/Phase-specific interpretation · 10 minutes/).click();
+  await expect(page.getByText(/Persistent intraglandular contrast retention and incomplete contrast evacuation are observed at 10 minutes/)).toBeVisible();
+  await expect(page.getByText(/Source timing discrepancy|Source timing limitation|brief states five minutes|corrected source media/i)).toHaveCount(0);
   await page.getByRole("button", { name: "Review educational reference findings" }).click(); await page.getByRole("button", { name: "Confirm clinician review" }).click();
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
   const ultrasoundReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Ultrasound Report" }) });
@@ -385,7 +387,8 @@ test("case three preloads right-sided media and completes modality, fusion, and 
   await previewPdf(sialographyReport, "View PDF", "Four-Phase Sialography Report"); await downloadAndInspect(sialographyReport, "Download PDF", 4, "SaliFusion_Case03_Sialography_Report.pdf");
   await page.getByRole("button", { name: /Continue to Fusion/ }).click();
   await expect(page.getByRole("button", { name: "Generate Fusion Analysis" })).toBeEnabled(); await page.getByRole("button", { name: "Generate Fusion Analysis" }).click();
-  await expect(page.getByText(/substantially increasing suspicion for early Sjögren syndrome/i)).toBeVisible();
+  await expect(page.getByText(/findings favor Sjögren syndrome as the leading diagnostic consideration/i)).toBeVisible();
+  await expect(page.getByText(/Source timing discrepancy|Source timing limitation|five-minute statement/i)).toHaveCount(0);
   await previewPdf(page.locator(".fusion-pdf-actions"), "View Fusion PDF", "Fusion Report"); await downloadAndInspect(page.locator(".fusion-pdf-actions"), "Download Fusion PDF", 5, "SaliFusion_Case03_Fusion_Report.pdf");
   await page.getByRole("button", { name: "Mark Reviewed" }).click(); await page.getByRole("button", { name: /Continue to Final Report/ }).click();
   const completeCard = page.locator(".report-center-grid article").filter({ has: page.getByRole("heading", { name: "Complete Case Report" }) });

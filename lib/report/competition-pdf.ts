@@ -154,7 +154,6 @@ function addFusion(layout: Layout, input: CompetitionReportInput) {
     layout.heading("Final Imaging Impression"); layout.paragraph(impression, { size: 11, font: "F2" });
     layout.heading("Differential Diagnoses"); layout.list(input.demoCase.fusion.differentials.map((item) => `${item.label}: ${item.rationale}`));
     layout.heading("Clinical Recommendations"); layout.list(input.demoCase.fusion.recommendations);
-    layout.heading("Source Timing Limitation"); layout.paragraph("The supplied evacuation image is visibly labeled 10 minutes. The separate task brief states five minutes; a five-minute claim requires corrected source media or clinician confirmation.", { color: color.amber });
     layout.heading("Educational Decision Support"); layout.paragraph(SCORE_DISCLAIMER, { size: 8.6, color: color.muted });
     return;
   }
