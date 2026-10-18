@@ -21,6 +21,7 @@ export const CASE_FOUR_PHASE_PATHS: Record<SialographyPhase, string> = {
   acinar: "/demo-cases/case-04/acinar-filling.png",
   evacuation: "/demo-cases/case-04/evacuation-10-minutes.png",
 };
+export const CASE_FIVE_ACINAR_PATH = "/demo-cases/case-05/right-submandibular-acinar.png";
 
 const caseTwoCompositeId = "case-02-bilateral-parotid-composite-ultrasound";
 const caseTwoLegacyIds = ["case-02-left-parotid-bmode-abnormal", "case-02-right-parotid-bmode-normal", "case-02-left-parotid-doppler-abnormal", "case-02-right-parotid-doppler-normal"];
@@ -71,13 +72,22 @@ export function builtInMediaForCase(caseId: CaseId): Pick<GlandExam, "ultrasound
       },
     };
   }
+  if (caseId === "case-05") {
+    return {
+      ultrasoundUploads: {},
+      phaseUploads: {
+        acinar: builtInPhase("Right Submandibular Sialography - Acinar Phase - Built-in Clinical Demo Media", CASE_FIVE_ACINAR_PATH),
+      },
+    };
+  }
   return { ultrasoundUploads: {}, phaseUploads: {} };
 }
 
 /**
  * Competition ultrasound slots. Cases 1 through 3 use owner-authorized, de-identified
  * built-in ultrasound media. Case 4 intentionally preserves only an optional local
- * ultrasound slot because its built-in pathway is sialography-first.
+ * ultrasound slot because its built-in pathway is sialography-first. Case 5 has
+ * one built-in acinar-phase radiograph and no performed ultrasound examination.
  */
 export const DEMO_MEDIA_SLOTS: DemoMediaSlot[] = [
   { id: "case-01-left-submandibular-bmode", caseId: "case-01", modality: "ultrasound", gland: "submandibular", side: "left", mode: "bmode", label: "Left submandibular · B-mode", mediaUrl: CASE_ONE_ULTRASOUND_PATH, status: "ready" },

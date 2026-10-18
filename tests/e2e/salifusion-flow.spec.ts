@@ -441,16 +441,65 @@ test("case four preloads four sialography phases and completes reports without u
   expect(writes).toEqual([]);
 });
 
-test("case five preserves right submandibular identity, not-provided scout, and ultrasound/MRI recommendations", async ({ page }) => {
+test("case five completes the one-image clinical, reporting, integrated, and PDF workflow", async ({ page }) => {
+  test.setTimeout(180_000);
+  const writes: string[] = []; page.on("request", (request) => { if (["POST", "PUT", "PATCH"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`); });
+  const previewPdf = async (scope: import("@playwright/test").Locator, dialogName: string, buttonName = "View PDF") => {
+    await scope.getByRole("button", { name: buttonName, exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: dialogName });
+    await expect(dialog.getByText("Preview Ready")).toBeVisible(); await expect(dialog.locator("canvas").first()).toBeVisible();
+    await dialog.getByRole("button", { name: "Close PDF preview" }).click();
+  };
+  const downloadAndInspect = async (scope: import("@playwright/test").Locator, expectedName: RegExp, expectedText: string, buttonName = "Download PDF") => {
+    const downloadPromise = page.waitForEvent("download"); await scope.getByRole("button", { name: buttonName, exact: true }).click();
+    const download = await downloadPromise; expect(download.suggestedFilename()).toMatch(expectedName); const path = await download.path(); expect(path).toBeTruthy();
+    const source = (await readFile(path!)).toString("latin1"); expect(source.startsWith("%PDF-1.4")).toBe(true); expect((source.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(1); expect(source).toContain(expectedText); expect(source).toContain("three minutes"); expect(source).not.toMatch(/delayed clearance|functional impairment|incomplete evacuation/i);
+    if (process.env.PDF_QA_DIR) { await mkdir(process.env.PDF_QA_DIR, { recursive: true }); await copyFile(path!, join(process.env.PDF_QA_DIR, download.suggestedFilename())); }
+  };
+
   await enterDemo(page);
   await page.locator(".case-card").nth(4).getByRole("button", { name: /Start Case/ }).click();
   await expect(page.getByLabel("Patient age")).toHaveValue("42");
   await expect(page.getByLabel("Affected gland")).toHaveValue("submandibular");
   await expect(page.getByLabel("Laterality")).toHaveValue("right");
+  await expect(page.getByLabel("Clinician notes")).toHaveValue(/rubbery right submandibular swelling/i);
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
-  await page.getByRole("tab", { name: /2D Sialography/ }).click();
+  await expect(page.getByRole("tab", { name: /2D Sialography/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Right Submandibular Sialography - Acinar Phase" })).toBeVisible();
   await expect(page.locator(".phase-card").first().getByText("Not Provided").first()).toBeVisible();
+  await expect(page.locator(".phase-card").filter({ hasText: "Ductal filling" })).toContainText("Source Report Only");
+  await expect(page.locator(".phase-card").filter({ hasText: "Evacuation" })).toContainText("Source Report Only");
+  const acinarImage = page.locator(".phase-card").filter({ hasText: "Acinar / parenchymal filling" }).locator("img");
+  await expect(acinarImage).toHaveCount(1);
+  await expect.poll(() => acinarImage.evaluate((image: HTMLImageElement) => ({ src: image.src, width: image.naturalWidth, height: image.naturalHeight }))).toMatchObject({ src: expect.stringContaining("/demo-cases/case-05/right-submandibular-acinar.png"), width: 1448, height: 1086 });
+  await expect(page.getByText(/Missing phase images are not required to complete Case 5/)).toBeVisible();
+  await page.getByText(/Phase-specific interpretation · Three minutes/).click();
+  await expect(page.getByText(/satisfactory glandular contrast drainage/i)).toBeVisible();
   await page.getByRole("button", { name: "Review educational reference findings" }).click();
-  await expect(page.getByText(/Targeted Ultrasound of the Right Submandibular Gland with Color\/Power Doppler/)).toBeVisible();
-  await expect(page.getByText(/MRI of the Neck and Right Submandibular Region/)).toBeVisible();
+  await expect(page.getByText(/Targeted ultrasound of the right submandibular gland with Doppler assessment/i)).toBeVisible();
+  await expect(page.getByText(/MRI of the neck and right submandibular region/i)).toBeVisible();
+  await page.getByRole("button", { name: "Confirm clinician review" }).click();
+  await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
+  const sialographyCard = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Right Submandibular Gland Sialography Report" }) });
+  await expect(sialographyCard).toContainText("Clinician Reviewed");
+  await expect(sialographyCard).toContainText("Original clinician-reported findings - ductal phase source image unavailable");
+  await previewPdf(sialographyCard, "Right Submandibular Gland Sialography Report");
+  await downloadAndInspect(sialographyCard, /SaliFusion_Case05_Sialography_Report\.pdf/, "ACINAR / PARENCHYMAL FILLING - IMAGE AVAILABLE");
+  await page.getByRole("button", { name: /Continue to Fusion/ }).click();
+  await expect(page.getByRole("button", { name: "Generate Integrated Assessment" })).toBeEnabled(); await page.getByRole("button", { name: "Generate Integrated Assessment" }).click();
+  await expect(page.getByRole("heading", { name: "Integrated Clinical and Sialographic Assessment", level: 1 })).toBeVisible();
+  await expect(page.getByText(/not multimodal fusion/i)).toBeVisible();
+  await expect(page.getByText(/Chronic sclerosing sialadenitis \(Küttner tumor\)/i)).toBeVisible();
+  await page.getByRole("button", { name: "Modify Impression" }).click();
+  const editedImpression = "Clinician-edited Case 05 impression: suspected right submandibular space-occupying lesion remains indeterminate; targeted Doppler ultrasound and contrast-enhanced MRI are recommended.";
+  await page.getByLabel("Final imaging impression").fill(editedImpression);
+  await page.getByRole("button", { name: "Mark Reviewed" }).click();
+  const fusionActions = page.locator(".fusion-pdf-actions");
+  await previewPdf(fusionActions, "Integrated Clinical and Sialographic Assessment", "View Integrated PDF");
+  await downloadAndInspect(fusionActions, /SaliFusion_Case05_Integrated_Clinical_Sialographic_Assessment_Report\.pdf/, "Clinician-edited Case 05 impression", "Download Integrated PDF");
+  await page.getByRole("button", { name: /Continue to Final Report/ }).click();
+  const completeCard = page.locator(".report-center-grid article").filter({ has: page.getByRole("heading", { name: "Complete Case Report PDF" }) });
+  await expect(completeCard).toContainText("Available"); await previewPdf(completeCard, "SaliFusion - Case 05 Complete Imaging Report"); await downloadAndInspect(completeCard, /SaliFusion_Case05_Complete_Case_Report\.pdf/, "Clinician-edited Case 05 impression");
+  await expect(page.getByText(editedImpression)).toBeVisible();
+  expect(writes).toEqual([]);
 });

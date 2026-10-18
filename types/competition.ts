@@ -84,7 +84,7 @@ export interface ModalityFixture {
 export interface SialographyPhaseFixture {
   phase: SialographyPhase;
   label: string;
-  availability: "awaiting-image" | "not-provided";
+  availability: "awaiting-image" | "not-provided" | "report-only";
   findings: string[];
   interpretation: string;
   timing?: string;

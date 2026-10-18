@@ -36,7 +36,8 @@ const BOTTOM = 62;
 const phaseOrder: SialographyPhase[] = ["precontrast", "ductal", "acinar", "evacuation"];
 const color = { ink: "0.10 0.16 0.18", muted: "0.36 0.43 0.44", teal: "0.04 0.43 0.40", tealSoft: "0.91 0.97 0.96", line: "0.83 0.87 0.87", amber: "0.55 0.36 0.10", white: "1 1 1" };
 
-function safe(value: string) { return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[\u2010-\u2015]/g, "-").replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim().replace(/[()\\]/g, "\\$&"); }
+function normalizedText(value: string) { return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[\u2010-\u2015]/g, "-").replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim(); }
+function safe(value: string) { return normalizedText(value).replace(/[()\\]/g, "\\$&"); }
 function concat(parts: Uint8Array[]) { const output = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0)); let offset = 0; for (const part of parts) { output.set(part, offset); offset += part.length; } return output; }
 function streamObject(dictionary: string, stream: Uint8Array) { return concat([encoder.encode(`<< ${dictionary} /Length ${stream.length} >>\nstream\n`), stream, encoder.encode("\nendstream")]); }
 function text(value: string, x: number, y: number, size = 9.5, font: FontName = "F1", fill = color.ink) { return `BT /${font} ${size} Tf ${fill} rg 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${safe(value)}) Tj ET`; }
@@ -44,7 +45,7 @@ function line(x1: number, y1: number, x2: number, y2: number, stroke = color.lin
 function fillRect(x: number, y: number, width: number, height: number, fill: string) { return `${fill} rg ${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re f`; }
 function strokeRect(x: number, y: number, width: number, height: number, stroke = color.line) { return `${stroke} RG .6 w ${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re S`; }
 function wrap(value: string, width: number, size: number) {
-  const max = Math.max(18, Math.floor(width / (size * .52))); const words = safe(value).split(" "); const rows: string[] = []; let current = "";
+  const max = Math.max(18, Math.floor(width / (size * .52))); const words = normalizedText(value).split(" "); const rows: string[] = []; let current = "";
   for (const word of words) { const next = `${current} ${word}`.trim(); if (next.length > max && current) { rows.push(current); current = word; } else current = next; }
   if (current) rows.push(current); return rows;
 }
@@ -67,7 +68,7 @@ class Layout {
   labelValue(label: string, value: string) { this.ensure(28); this.page.commands.push(text(label.toUpperCase(), LEFT, this.y, 7.5, "F2", color.muted)); this.y -= 12; this.paragraph(value, { size: 9.3, gap: 7 }); }
 }
 
-function reportTitle(input: CompetitionReportInput) { if (input.demoCase.id === "case-02") return input.kind === "complete" ? "Case 02 - Complete Imaging Report" : input.kind === "fusion" ? "Case 02 - Integrated Clinical and Ultrasound Assessment" : "Case 02 - Bilateral Parotid Ultrasound and Doppler Examination"; if (input.demoCase.id === "case-04") return input.kind === "complete" ? "Case 04 - Complete Imaging Report" : input.kind === "fusion" ? "Case 04 - Integrated Available-Evidence Assessment" : input.kind === "sialography" ? "Case 04 - Four-Phase Sialography Report" : input.kind === "ultrasound" ? "Case 04 - Ultrasound Not Performed / Not Provided" : "Case 04 - CBCT Report"; const kind = input.kind; return kind === "complete" ? "Complete Case Report" : kind === "fusion" ? "Integrated Multimodal Fusion Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "cbct" ? "CBCT Report" : "Ultrasound Report"; }
+function reportTitle(input: CompetitionReportInput) { if (input.demoCase.id === "case-02") return input.kind === "complete" ? "Case 02 - Complete Imaging Report" : input.kind === "fusion" ? "Case 02 - Integrated Clinical and Ultrasound Assessment" : "Case 02 - Bilateral Parotid Ultrasound and Doppler Examination"; if (input.demoCase.id === "case-04") return input.kind === "complete" ? "Case 04 - Complete Imaging Report" : input.kind === "fusion" ? "Case 04 - Integrated Available-Evidence Assessment" : input.kind === "sialography" ? "Case 04 - Four-Phase Sialography Report" : input.kind === "ultrasound" ? "Case 04 - Ultrasound Not Performed / Not Provided" : "Case 04 - CBCT Report"; if (input.demoCase.id === "case-05") return input.kind === "complete" ? "Case 05 - Complete Imaging Report" : input.kind === "fusion" ? "Case 05 - Integrated Clinical and Sialographic Assessment" : input.kind === "sialography" ? "Case 05 - Right Submandibular Gland Sialography Report" : input.kind === "ultrasound" ? "Case 05 - Ultrasound Recommended / Not Performed" : "Case 05 - CBCT Not Performed"; const kind = input.kind; return kind === "complete" ? "Complete Case Report" : kind === "fusion" ? "Integrated Multimodal Fusion Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "cbct" ? "CBCT Report" : "Ultrasound Report"; }
 function modalitiesFor(input: CompetitionReportInput) { return input.kind === "fusion" || input.kind === "complete" ? input.includedModalities : [input.kind as ClinicalModality]; }
 function modalityLabel(modality: ClinicalModality) { return modality === "sialography" ? "Four-Phase Sialography" : modality === "cbct" ? "CBCT" : "Ultrasound B-mode"; }
 function caseTwoHistory(history: HistoryAnswers) { const parts = [`${history.symptomDuration || "Duration not documented"} ${history.onset || "unknown-onset"} ${history.laterality} ${history.gland} swelling`, `pain ${history.pain}`, `erythema/local warmth ${history.rednessWarmth}`, `purulent discharge ${history.purulentDischarge}`, `xerostomia ${history.xerostomia}`, `xerophthalmia ${history.xerophthalmia}`, `fever ${history.fever}`]; return parts.join("; ") + "."; }
@@ -80,7 +81,7 @@ function addOpening(layout: Layout, input: CompetitionReportInput) {
   layout.y = 660;
   layout.paragraph(`Case ${input.demoCase.number}`, { size: 12, font: "F2", color: color.teal, gap: 2 });
   layout.paragraph(input.demoCase.id === "case-02" ? "Acute Left Parotitis" : input.demoCase.id === "case-01" ? "Left Submandibular Sialolithiasis with Complex Obstructive Ductal Disease" : input.demoCase.title, { size: 17, font: "F2", gap: 14 });
-  const modalities = input.demoCase.id === "case-02" ? "B-mode + Doppler Imaging" : modalitiesFor(input).map(modalityLabel).join(", ");
+  const modalities = input.demoCase.id === "case-02" ? "B-mode + Doppler Imaging" : input.demoCase.id === "case-05" ? "Right Submandibular Sialography - Acinar image plus source-report findings" : modalitiesFor(input).map(modalityLabel).join(", ");
   const reviewStatus = input.reportReviewed ? "Clinician reviewed educational report" : input.media?.length ? "Educational draft - not yet clinician reviewed" : "Educational draft - image verification has not occurred";
   const fields = [
     ["Demo case identifier", `Case ${input.demoCase.number}`], ["Affected gland", input.demoCase.id === "case-02" ? "Bilateral parotid comparison; symptomatic left gland" : `${input.exam.side} ${input.exam.gland}`],
@@ -110,8 +111,22 @@ function addCaseTwoUltrasound(layout: Layout, input: CompetitionReportInput) {
   layout.heading("Final Impression"); layout.paragraph("Acute Left Parotitis / Acute Sialadenitis. Comparative B-mode and Doppler findings favor acute inflammatory involvement of the symptomatic left parotid gland. Definite bacterial infection and abscess are not established by this short video.", { size: 10.5, font: "F2" });
 }
 
+function addCaseFiveSialography(layout: Layout, input: CompetitionReportInput) {
+  const phases = input.demoCase.sialographyPhases;
+  layout.heading("Clinical Indication"); layout.paragraph("Chronic, painless, non-tender, gradually enlarging right submandibular swelling with rubbery consistency and absent expressible saliva from the right Wharton's duct during massage.");
+  layout.heading("Technique and Source Availability"); layout.paragraph("One original right submandibular acinar/parenchymal-phase sialogram was reviewed. Ductal and three-minute evacuation findings are transcribed from the original clinician report; their source images were not provided. No scout image, ultrasound, MRI, or CBCT was supplied.");
+  layout.heading("Ductal Filling Phase - Clinician-Reported"); layout.list(phases.ductal.findings); layout.paragraph(phases.ductal.interpretation); layout.paragraph("Original clinician-reported findings - ductal phase image unavailable.", { size: 8.5, color: color.muted });
+  layout.heading("Acinar / Parenchymal Filling - Image Available"); layout.list(phases.acinar.findings); layout.paragraph(phases.acinar.interpretation); layout.paragraph("Original clinical image available and preloaded. Image review does not establish lesion histology, composition, biological behavior, malignancy, or dimensions.", { size: 8.5, color: color.muted });
+  layout.heading("Evacuation Phase - Clinician-Reported at Three Minutes"); layout.list(phases.evacuation.findings); layout.paragraph(phases.evacuation.interpretation); layout.paragraph("Original clinician-reported finding - evacuation phase image unavailable.", { size: 8.5, color: color.muted });
+  layout.heading("Overall Imaging Impression"); layout.paragraph(input.demoCase.sialography.interpretation, { size: 10.5, font: "F2" });
+  layout.heading("Differential Diagnoses"); layout.list(input.demoCase.sialography.differentials.map((item) => `${item.label}: ${item.rationale}`));
+  layout.heading("Recommended Complementary Assessment"); layout.list(input.demoCase.sialography.recommendations);
+  layout.heading("Diagnostic Limitations"); layout.list(input.demoCase.sialography.limitations);
+}
+
 function addModality(layout: Layout, input: CompetitionReportInput, modality: ClinicalModality) {
   if (input.demoCase.id === "case-02" && modality === "ultrasound") { addCaseTwoUltrasound(layout, input); return; }
+  if (input.demoCase.id === "case-05" && modality === "sialography") { addCaseFiveSialography(layout, input); return; }
   const fixture = input.demoCase[modality];
   layout.heading(modality === "sialography" ? "Four-Phase Sialography Assessment" : `${modalityLabel(modality)} Assessment`);
   layout.labelValue("Evidence status", input.exam.clinicianVerified[modality] ? "Clinician-confirmed observation" : "Curated educational reference reviewed against browser-local media; direct clinician confirmation remains required.");
@@ -174,6 +189,23 @@ function addFusion(layout: Layout, input: CompetitionReportInput) {
     layout.heading("Educational Decision Support"); layout.paragraph(SCORE_DISCLAIMER, { size: 8.6, color: color.muted });
     return;
   }
+  if (input.demoCase.id === "case-05") {
+    const impression = input.fusionImpression || input.demoCase.fusion.interpretation;
+    layout.heading("Integrated Clinical and Sialographic Assessment");
+    layout.labelValue("Assessment basis", "Clinical history, one available acinar/parenchymal-phase image, and original clinician-reported ductal and three-minute evacuation findings. This is not multimodal fusion.");
+    layout.labelValue("Clinical history", input.demoCase.clinicalSummary);
+    layout.labelValue("Image-supported acinar findings", input.demoCase.sialographyPhases.acinar.interpretation);
+    layout.labelValue("Clinician-reported ductal findings", input.demoCase.sialographyPhases.ductal.interpretation);
+    layout.labelValue("Clinician-reported evacuation", input.demoCase.sialographyPhases.evacuation.interpretation);
+    layout.heading("Final Imaging Impression"); layout.paragraph(impression, { size: 11, font: "F2" });
+    layout.heading("Differential Diagnoses"); layout.list(input.demoCase.fusion.differentials.map((item) => `${item.label}: ${item.rationale}`));
+    layout.heading("Recommended Ultrasound and Doppler Assessment"); layout.paragraph(input.demoCase.ultrasound.recommendations[0]);
+    layout.heading("Recommended MRI and Conditional Tissue Sampling"); layout.list(input.demoCase.fusion.recommendations.slice(1));
+    layout.heading("Diagnostic Limitations"); layout.list(input.demoCase.fusion.limitations);
+    layout.heading("Clinician Review Status"); layout.paragraph(input.fusionReviewed ? "The current integrated impression has been marked reviewed by the demonstration clinician." : "Educational draft - the integrated impression has not yet been marked reviewed.");
+    layout.heading("Educational Demonstration Disclaimer"); layout.paragraph("This educational reference interpretation is not independent automated AI image diagnosis and is not clinically validated.", { size: 8.6, color: color.muted });
+    return;
+  }
   const impression = input.fusionImpression || input.demoCase.fusion.interpretation;
   layout.heading("Integrated Multimodal Assessment");
   layout.labelValue("Clinical history", input.demoCase.clinicalSummary);
@@ -219,11 +251,11 @@ function addMediaPages(layout: Layout, input: CompetitionReportInput) {
   const isPhase = (item: ReportMedia) => /scout|precontrast|ductal|acinar|evacuation/i.test(item.label);
   const ultrasound = media.filter((item) => !isPhase(item)); const phases = media.filter(isPhase);
   for (const item of ultrasound) { layout.newPage(); layout.page.commands.push(text("Representative Ultrasound Frame", LEFT, 760, 13, "F2", color.teal)); placeMedia(layout.page, item, 710, 520, "Im1", findingForMedia(input, item.label)); }
-  for (let index = 0; index < phases.length; index += 2) { layout.newPage(); layout.page.commands.push(text("Four-Phase Sialography Image Review", LEFT, 760, 13, "F2", color.teal)); const pair = phases.slice(index, index + 2); pair.forEach((item, pairIndex) => placeMedia(layout.page, item, pairIndex === 0 ? 700 : 365, 245, `Im${pairIndex + 1}`, findingForMedia(input, item.label))); }
+  for (let index = 0; index < phases.length; index += 2) { layout.newPage(); layout.page.commands.push(text(input.demoCase.id === "case-05" ? "Acinar / Parenchymal Phase Sialography Image" : "Four-Phase Sialography Image Review", LEFT, 760, 13, "F2", color.teal)); const pair = phases.slice(index, index + 2); pair.forEach((item, pairIndex) => placeMedia(layout.page, item, pairIndex === 0 ? 700 : 365, input.demoCase.id === "case-05" && pair.length === 1 ? 500 : 245, `Im${pairIndex + 1}`, findingForMedia(input, item.label))); }
 }
 
 function headerFooter(pageNumber: number, pageCount: number, input: CompetitionReportInput) {
-  const footerTitle = input.demoCase.id === "case-02" ? input.kind === "ultrasound" ? "Bilateral Parotid US Report" : input.kind === "fusion" ? "Integrated Clinical-US Report" : "Case 02 Complete Report" : input.demoCase.id === "case-04" ? input.kind === "sialography" ? "Four-Phase Sialography" : input.kind === "fusion" ? "Integrated Assessment" : input.kind === "complete" ? "Complete Case Report" : reportTitle(input).slice(0, 34) : reportTitle(input).slice(0, 34);
+  const footerTitle = input.demoCase.id === "case-02" ? input.kind === "ultrasound" ? "Bilateral Parotid US Report" : input.kind === "fusion" ? "Integrated Clinical-US Report" : "Case 02 Complete Report" : input.demoCase.id === "case-04" ? input.kind === "sialography" ? "Four-Phase Sialography" : input.kind === "fusion" ? "Integrated Assessment" : input.kind === "complete" ? "Complete Case Report" : reportTitle(input).slice(0, 34) : input.demoCase.id === "case-05" ? input.kind === "sialography" ? "Right Submandibular Sialography" : input.kind === "fusion" ? "Integrated Clinical-Sialographic" : input.kind === "complete" ? "Complete Case Report" : reportTitle(input).slice(0, 34) : reportTitle(input).slice(0, 34);
   return [
     text("SaliFusion", LEFT, 814, 13, "F2", color.teal),
     text("AI-Assisted Salivary Gland Imaging and Diagnostic Decision Support", LEFT + 77, 814, 7.8, "F1", color.muted),
