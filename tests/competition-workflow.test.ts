@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { COMPETITION_CASES, CORE_HISTORY_QUESTION_COUNT } from "@/data/competition-cases";
-import { builtInMediaForCase, CASE_ONE_PHASE_PATHS, CASE_ONE_ULTRASOUND_PATH, CASE_TWO_COMPOSITE_PATH, DEMO_MEDIA_SLOTS } from "@/data/demo-media";
+import { builtInMediaForCase, CASE_ONE_PHASE_PATHS, CASE_ONE_ULTRASOUND_PATH, CASE_THREE_PHASE_PATHS, CASE_THREE_ULTRASOUND_PATH, CASE_TWO_COMPOSITE_PATH, DEMO_MEDIA_SLOTS } from "@/data/demo-media";
 import { DIAGNOSTIC_SUPPORT_SCORES, SCORE_DISCLAIMER } from "@/data/diagnostic-scores";
 import { compatibleForFusion, examIdentity, getDuctalRecommendation, historyCompleteness } from "@/lib/clinical/competition-rules";
 import { createCompetitionPdf } from "@/lib/report/competition-pdf";
@@ -27,8 +27,8 @@ describe("five-case competition fixture", () => {
     }
   });
 
-  it("preserves the original six media slots and adds optional Case 4 and required Case 5 imports", () => {
-    const original = ["case-01-left-submandibular-bmode", "case-02-left-parotid-bmode-abnormal", "case-02-right-parotid-bmode-normal", "case-02-left-parotid-doppler-abnormal", "case-02-right-parotid-doppler-normal", "case-03-left-parotid-bmode"];
+  it("preserves the approved media slots and adds the right-sided Case 3 built-in slot", () => {
+    const original = ["case-01-left-submandibular-bmode", "case-02-left-parotid-bmode-abnormal", "case-02-right-parotid-bmode-normal", "case-02-left-parotid-doppler-abnormal", "case-02-right-parotid-doppler-normal", "case-03-right-parotid-bmode"];
     expect(original.every((id) => DEMO_MEDIA_SLOTS.some((slot) => slot.id === id))).toBe(true);
     expect(DEMO_MEDIA_SLOTS.filter((slot) => slot.caseId === "case-02")).toHaveLength(5);
     expect(DEMO_MEDIA_SLOTS.find((slot) => slot.id === "case-02-bilateral-parotid-composite-ultrasound")).toMatchObject({ composite: true, sourceRegion: "full", mode: "doppler" });
@@ -37,16 +37,21 @@ describe("five-case competition fixture", () => {
     expect(DEMO_MEDIA_SLOTS.some((slot) => slot.id === "case-05-right-submandibular-ultrasound")).toBe(true);
     expect(DEMO_MEDIA_SLOTS.find((slot) => slot.id === "case-01-left-submandibular-bmode")).toMatchObject({ status: "ready", mediaUrl: CASE_ONE_ULTRASOUND_PATH });
     expect(DEMO_MEDIA_SLOTS.find((slot) => slot.id === "case-02-bilateral-parotid-composite-ultrasound")).toMatchObject({ status: "ready", mediaUrl: CASE_TWO_COMPOSITE_PATH });
-    expect(DEMO_MEDIA_SLOTS.filter((slot) => !["case-01", "case-02"].includes(slot.caseId)).every((slot) => slot.status === "awaiting-upload" && slot.mediaUrl === undefined)).toBe(true);
+    expect(DEMO_MEDIA_SLOTS.find((slot) => slot.id === "case-03-right-parotid-bmode")).toMatchObject({ side: "right", status: "ready", mediaUrl: CASE_THREE_ULTRASOUND_PATH });
+    expect(DEMO_MEDIA_SLOTS.filter((slot) => ["case-04", "case-05"].includes(slot.caseId)).every((slot) => slot.status === "awaiting-upload" && slot.mediaUrl === undefined)).toBe(true);
   });
 
-  it("maps the six authorized built-in files to the correct Case 1 phases and Case 2 composite slot", () => {
+  it("maps the authorized built-in files for Cases 1 through 3", () => {
     const caseOne = builtInMediaForCase("case-01");
     expect(caseOne.ultrasoundUploads["case-01-left-submandibular-bmode"]).toMatchObject({ url: CASE_ONE_ULTRASOUND_PATH, storage: "built-in", objectUrl: false });
     expect(Object.fromEntries(phaseIds.map((phase) => [phase, caseOne.phaseUploads[phase]?.url]))).toEqual(CASE_ONE_PHASE_PATHS);
     expect(Object.values(caseOne.phaseUploads).every((asset) => asset?.storage === "built-in")).toBe(true);
     const caseTwo = builtInMediaForCase("case-02");
     expect(caseTwo.ultrasoundUploads["case-02-bilateral-parotid-composite-ultrasound"]).toMatchObject({ url: CASE_TWO_COMPOSITE_PATH, storage: "built-in", objectUrl: false });
+    const caseThree = builtInMediaForCase("case-03");
+    expect(caseThree.ultrasoundUploads["case-03-right-parotid-bmode"]).toMatchObject({ url: CASE_THREE_ULTRASOUND_PATH, storage: "built-in", objectUrl: false });
+    expect(Object.fromEntries(phaseIds.map((phase) => [phase, caseThree.phaseUploads[phase]?.url]))).toEqual(CASE_THREE_PHASE_PATHS);
+    expect(Object.values(caseThree.phaseUploads).every((asset) => asset?.storage === "built-in")).toBe(true);
   });
 });
 
@@ -70,12 +75,16 @@ describe("independent four-phase sialography source of truth", () => {
     expect(Object.values(item.sialographyPhases).every((phase) => phase.availability === "not-provided")).toBe(true);
   });
 
-  it("keeps Case 3 ultrasound normal while separating normal main duct and abnormal peripheral findings", () => {
+  it("keeps Case 3 right-sided ultrasound subtle while the sialography supplies the Sjögren-favoring pattern", () => {
     const item = byId("case-03");
-    expect(item.ultrasound.interpretation).toMatch(/no definite sonographic parenchymal abnormality/i);
-    expect(item.ultrasound.observedFindings.join(" ")).not.toMatch(/heterogeneity|hypoechoic/i);
-    expect(item.sialographyPhases.ductal.interpretation).toMatch(/Normal Main Duct Architecture/i);
-    expect(item.sialographyPhases.acinar.findings.join(" ")).toMatch(/Peripheral Punctate Sialectasis/i);
+    expect(item.history).toMatchObject({ gland: "parotid", laterality: "bilateral", xerostomia: "yes", xerophthalmia: "yes" });
+    expect(item.ultrasound.interpretation).toMatch(/subtle nonspecific right parotid parenchymal heterogeneity/i);
+    expect(item.sialographyPhases.ductal.interpretation).toMatch(/right Stensen duct.*normal in caliber and course/i);
+    expect(item.sialographyPhases.acinar.findings.join(" ")).toMatch(/punctate sialectatic.*Leafless blossoming tree/i);
+    expect(item.evacuationTimeMinutes).toBe(10);
+    expect(item.sialographyPhases.evacuation.timing).toMatch(/10 minutes/i);
+    expect(item.sialographyPhases.evacuation.interpretation).toMatch(/delayed salivary clearance.*functional gland impairment/i);
+    expect(item.sialography.limitations.join(" ")).toMatch(/brief specifies five minutes.*burned-in 10-minute label/i);
   });
 
   it("supports Case 4 as sialography-only with negative scout, positive filling defect, and five-minute delay", () => {
@@ -135,7 +144,7 @@ describe("fusion, provenance, and reports", () => {
   });
 
   it("does not transfer preset diagnoses to unrelated uploads", () => {
-    expect(DEMO_MEDIA_SLOTS.filter((slot) => !["case-01", "case-02"].includes(slot.caseId)).every((slot) => slot.mediaUrl === undefined && slot.status === "awaiting-upload")).toBe(true);
+    expect(DEMO_MEDIA_SLOTS.filter((slot) => ["case-04", "case-05"].includes(slot.caseId)).every((slot) => slot.mediaUrl === undefined && slot.status === "awaiting-upload")).toBe(true);
     expect(byId("case-05").ultrasound.observedFindings).toHaveLength(0);
     expect(byId("case-05").ultrasound.interpretation).toMatch(/No ultrasound findings are manufactured/i);
   });
@@ -177,5 +186,19 @@ describe("fusion, provenance, and reports", () => {
     expect(text).toContain("This is not ultrasound-sialography fusion");
     expect(text).toContain("Contrast Sialography - Defer During the Acute Inflammatory Episode");
     expect(text).not.toContain("Cross-Modal Concordance");
+  });
+
+  it.each(["ultrasound", "sialography", "fusion", "complete"] as const)("creates the Case 3 %s PDF with right-sided built-in media and source-accurate timing", (kind) => {
+    const demoCase = byId("case-03"); const media = builtInMediaForCase("case-03");
+    const exam = { ...emptyExam("right"), reviewed: { ultrasound: true, sialography: true }, clinicianVerified: { ultrasound: true, sialography: true }, ...media };
+    const bytes = createCompetitionPdf({ kind, demoCase, history: demoCase.history, exam, includedModalities: ["ultrasound", "sialography"], fusionImpression: demoCase.fusion.interpretation, fusionReviewed: true, reportReviewed: true });
+    const text = new TextDecoder().decode(bytes);
+    expect(text.startsWith("%PDF-1.4")).toBe(true);
+    expect(text).toContain("right parotid");
+    if (kind !== "ultrasound") expect(text).toMatch(/source image labeled 10 minutes|visibly labeled 10 minutes/i);
+    if (kind === "fusion" || kind === "complete") {
+      expect(text).toContain("substantially");
+      expect(text).toContain("increasing suspicion for early Sjogren syndrome");
+    }
   });
 });

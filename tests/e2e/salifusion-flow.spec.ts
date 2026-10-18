@@ -51,7 +51,7 @@ test("case one preloads the ordered four-phase study and permits a browser-local
   await expect(page.getByText(/Phase-specific interpretation · Five minutes/)).toBeVisible();
   await page.getByLabel("Upload Ductal filling").setInputFiles({ name: "synthetic-ductal", mimeType: "image/png", buffer: pixelPng });
   await expect(page.getByText(/4 of 4 phases available/)).toBeVisible();
-  await expect(page.locator(".phase-card").filter({ hasText: "Ductal filling" }).getByRole("button", { name: "Remove", exact: true })).toBeVisible();
+  await expect(page.locator(".phase-card").filter({ hasText: "Ductal filling" }).getByRole("button", { name: "Restore built-in", exact: true })).toBeVisible();
 });
 
 test("case one built-in media, fusion, and image-bearing reports remain connected without uploads", async ({ page }) => {
@@ -331,16 +331,66 @@ test("case two restores an explicitly consented video from browser-local storage
   expect(writes).toEqual([]);
 });
 
-test("case three presents selective ductal reasoning and score disclaimer", async ({ page }) => {
+test("case three preloads right-sided media and completes modality, fusion, and final PDFs", async ({ page }) => {
+  test.setTimeout(180_000);
+  const writes: string[] = []; page.on("request", (request) => { if (["POST", "PUT", "PATCH"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`); });
+  const downloadAndInspect = async (scope: import("@playwright/test").Locator, buttonName: string, expectedImages: number, archiveName: string) => {
+    const downloadPromise = page.waitForEvent("download");
+    await scope.getByRole("button", { name: buttonName, exact: true }).click();
+    const download = await downloadPromise; const path = await download.path(); expect(path).toBeTruthy();
+    const bytes = await readFile(path!); const source = bytes.toString("latin1");
+    expect(source.startsWith("%PDF-1.4")).toBe(true);
+    expect((source.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(expectedImages);
+    expect(source).toContain("right parotid");
+    if (archiveName.includes("Ultrasound")) {
+      expect(source).toContain("Representative Ultrasound Frame");
+      expect(source).toContain("Subtle nonspecific right parotid parenchymal heterogeneity");
+      expect(source).not.toContain("Four-Phase Sialography Image Review");
+    }
+    if (expectedImages > 1) expect(source).toMatch(/source image labeled 10 minutes|visibly labeled 10 minutes/i);
+    if (process.env.PDF_QA_DIR) { await mkdir(process.env.PDF_QA_DIR, { recursive: true }); await copyFile(path!, join(process.env.PDF_QA_DIR, archiveName)); }
+  };
+  const previewPdf = async (scope: import("@playwright/test").Locator, buttonName: string, dialogName: string) => {
+    await scope.getByRole("button", { name: buttonName, exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: dialogName });
+    await expect(dialog).toBeVisible(); await expect(dialog.getByText("Preview Ready")).toBeVisible(); await expect(dialog.locator("canvas").first()).toBeVisible();
+    await dialog.getByRole("button", { name: "Close PDF preview" }).click();
+  };
+
   await enterDemo(page);
   await page.locator(".case-card").nth(2).getByRole("button", { name: /Start Case/ }).click();
+  await expect(page.getByLabel("Laterality")).toHaveValue("bilateral");
+  await expect(page.getByRole("group", { name: "Xerostomia" }).getByRole("button", { name: "Yes", exact: true })).toHaveClass(/selected/);
+  await expect(page.getByRole("group", { name: "Xerophthalmia" }).getByRole("button", { name: "Yes", exact: true })).toHaveClass(/selected/);
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
-  await page.getByRole("button", { name: "Review educational reference findings" }).click();
-  await expect(page.getByText(/No definite sonographic parenchymal abnormality/).first()).toBeVisible();
+  const video = page.locator("video");
+  await expect(video).toHaveAttribute("src", /\/demo-cases\/case-03\/right-parotid-ultrasound\.mp4$/);
+  await expect(page.getByText(/Built-in Clinical Demo Media is served from this protected Preview/)).toBeVisible();
+  await page.getByRole("button", { name: "Play / Pause" }).click();
+  await expect.poll(() => video.evaluate((node: HTMLVideoElement) => node.currentTime)).toBeGreaterThan(0);
+  await page.reload(); await page.getByRole("button", { name: /Enter Clinical Demo/ }).click(); await page.locator(".case-card").nth(2).getByRole("button", { name: /Start Case/ }).click(); await page.getByRole("button", { name: /Continue to Imaging/ }).click();
+  await expect(page.locator("video")).toHaveAttribute("src", /\/demo-cases\/case-03\/right-parotid-ultrasound\.mp4$/);
+  await page.getByRole("button", { name: "Review educational reference findings" }).click(); await expect(page.getByText(/Subtle nonspecific right parotid parenchymal heterogeneity/).first()).toBeVisible(); await page.getByRole("button", { name: "Confirm clinician review" }).click();
   await page.getByRole("tab", { name: /2D Sialography/ }).click();
   await expect(page.getByText("Selective ductal assessment only")).toBeVisible();
-  await expect(page.getByText("Educational Scenario Findings — Awaiting Image Verification").first()).toBeVisible();
-  await expect(page.getByText(/Phase-specific interpretation/).first()).toBeVisible();
+  await expect(page.locator(".phase-card img")).toHaveCount(4);
+  await expect.poll(() => page.locator(".phase-card img").evaluateAll((images: HTMLImageElement[]) => images.every((image) => image.src.includes("/demo-cases/case-03/") && image.naturalWidth > 800 && image.naturalHeight > 700))).toBe(true);
+  await page.getByText(/Phase-specific interpretation · Source image label: 10 minutes/).click();
+  await expect(page.getByText(/brief states five minutes, but the supplied image visibly states 10 minutes/)).toBeVisible();
+  await page.getByRole("button", { name: "Review educational reference findings" }).click(); await page.getByRole("button", { name: "Confirm clinician review" }).click();
+  await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
+  const ultrasoundReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Ultrasound Report" }) });
+  const sialographyReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Four-Phase Sialography Report" }) });
+  await previewPdf(ultrasoundReport, "View PDF", "Ultrasound Report"); await downloadAndInspect(ultrasoundReport, "Download PDF", 1, "SaliFusion_Case03_Ultrasound_Report.pdf");
+  await previewPdf(sialographyReport, "View PDF", "Four-Phase Sialography Report"); await downloadAndInspect(sialographyReport, "Download PDF", 4, "SaliFusion_Case03_Sialography_Report.pdf");
+  await page.getByRole("button", { name: /Continue to Fusion/ }).click();
+  await expect(page.getByRole("button", { name: "Generate Fusion Analysis" })).toBeEnabled(); await page.getByRole("button", { name: "Generate Fusion Analysis" }).click();
+  await expect(page.getByText(/substantially increasing suspicion for early Sjögren syndrome/i)).toBeVisible();
+  await previewPdf(page.locator(".fusion-pdf-actions"), "View Fusion PDF", "Fusion Report"); await downloadAndInspect(page.locator(".fusion-pdf-actions"), "Download Fusion PDF", 5, "SaliFusion_Case03_Fusion_Report.pdf");
+  await page.getByRole("button", { name: "Mark Reviewed" }).click(); await page.getByRole("button", { name: /Continue to Final Report/ }).click();
+  const completeCard = page.locator(".report-center-grid article").filter({ has: page.getByRole("heading", { name: "Complete Case Report" }) });
+  await expect(completeCard).toContainText("Available"); await previewPdf(completeCard, "View PDF", "Complete Case Report"); await downloadAndInspect(completeCard, "Download PDF", 5, "SaliFusion_Case03_Complete_Case_Report.pdf");
+  expect(writes).toEqual([]);
 });
 
 test("case four starts with an independent sialography pathway and reports five-minute delayed clearance", async ({ page }) => {

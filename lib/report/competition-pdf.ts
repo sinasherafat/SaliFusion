@@ -142,6 +142,22 @@ function addFusion(layout: Layout, input: CompetitionReportInput) {
     layout.heading("Contrast Sialography Safety Decision"); layout.paragraph(`${safety.title}. ${safety.explanation}`, { color: safety.state === "defer" ? color.amber : color.ink }); layout.list(safety.considerations);
     return;
   }
+  if (input.demoCase.id === "case-03") {
+    const impression = input.fusionImpression || input.demoCase.fusion.interpretation;
+    layout.heading("Integrated Right Parotid Assessment");
+    layout.labelValue("Clinical history", input.demoCase.clinicalSummary);
+    layout.labelValue("Ultrasound contribution", input.demoCase.ultrasound.interpretation);
+    layout.labelValue("Scout / precontrast", input.demoCase.sialographyPhases.precontrast.interpretation);
+    layout.labelValue("Ductal filling", input.demoCase.sialographyPhases.ductal.interpretation);
+    layout.labelValue("Acinar / parenchymal filling", input.demoCase.sialographyPhases.acinar.interpretation);
+    layout.labelValue("Evacuation and functional clearance", input.demoCase.sialographyPhases.evacuation.interpretation);
+    layout.heading("Final Imaging Impression"); layout.paragraph(impression, { size: 11, font: "F2" });
+    layout.heading("Differential Diagnoses"); layout.list(input.demoCase.fusion.differentials.map((item) => `${item.label}: ${item.rationale}`));
+    layout.heading("Clinical Recommendations"); layout.list(input.demoCase.fusion.recommendations);
+    layout.heading("Source Timing Limitation"); layout.paragraph("The supplied evacuation image is visibly labeled 10 minutes. The separate task brief states five minutes; a five-minute claim requires corrected source media or clinician confirmation.", { color: color.amber });
+    layout.heading("Educational Decision Support"); layout.paragraph(SCORE_DISCLAIMER, { size: 8.6, color: color.muted });
+    return;
+  }
   const impression = input.fusionImpression || input.demoCase.fusion.interpretation;
   layout.heading("Integrated Multimodal Assessment");
   layout.labelValue("Clinical history", input.demoCase.clinicalSummary);
@@ -165,8 +181,8 @@ function findingForMedia(input: CompetitionReportInput, label: string) {
     if (normalized.includes("right parotid") && normalized.includes("doppler")) return "Comparatively less conspicuous Doppler vascular signal.";
     return "Increased Doppler vascular signals relative to the contralateral right gland.";
   }
-  if (normalized.includes("ultrasound")) return input.demoCase.ultrasound.interpretation;
-  const phase = normalized.includes("scout") ? "precontrast" : normalized.includes("ductal") ? "ductal" : normalized.includes("acinar") ? "acinar" : "evacuation";
+  const phase = normalized.includes("scout") || normalized.includes("precontrast") ? "precontrast" : normalized.includes("ductal") ? "ductal" : normalized.includes("acinar") ? "acinar" : normalized.includes("evacuation") ? "evacuation" : undefined;
+  if (!phase) return input.demoCase.ultrasound.interpretation;
   return input.demoCase.sialographyPhases[phase].interpretation;
 }
 
@@ -184,7 +200,8 @@ function addMediaPages(layout: Layout, input: CompetitionReportInput) {
     const [composite, ...views] = media; layout.newPage(); layout.page.commands.push(text("Original Composite Ultrasound Frame", LEFT, 760, 13, "F2", color.teal)); placeMedia(layout.page, composite, 710, 500, "Im1", findingForMedia(input, composite.label));
     for (let index = 0; index < views.length; index += 2) { layout.newPage(); layout.page.commands.push(text("Source-Quadrant Comparison Views", LEFT, 760, 13, "F2", color.teal)); views.slice(index, index + 2).forEach((item, pairIndex) => placeMedia(layout.page, item, pairIndex === 0 ? 700 : 365, 245, `Im${pairIndex + 1}`, findingForMedia(input, item.label))); } return;
   }
-  const ultrasound = media.filter((item) => item.label.toLowerCase().includes("ultrasound")); const phases = media.filter((item) => !item.label.toLowerCase().includes("ultrasound"));
+  const isPhase = (item: ReportMedia) => /scout|precontrast|ductal|acinar|evacuation/i.test(item.label);
+  const ultrasound = media.filter((item) => !isPhase(item)); const phases = media.filter(isPhase);
   for (const item of ultrasound) { layout.newPage(); layout.page.commands.push(text("Representative Ultrasound Frame", LEFT, 760, 13, "F2", color.teal)); placeMedia(layout.page, item, 710, 520, "Im1", findingForMedia(input, item.label)); }
   for (let index = 0; index < phases.length; index += 2) { layout.newPage(); layout.page.commands.push(text("Four-Phase Sialography Image Review", LEFT, 760, 13, "F2", color.teal)); const pair = phases.slice(index, index + 2); pair.forEach((item, pairIndex) => placeMedia(layout.page, item, pairIndex === 0 ? 700 : 365, 245, `Im${pairIndex + 1}`, findingForMedia(input, item.label))); }
 }

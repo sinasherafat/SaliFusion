@@ -21,12 +21,12 @@ const caseTwoFusionDraft = "Comparative B-mode ultrasound and Doppler findings, 
 const caseTwoCompositeId = "case-02-bilateral-parotid-composite-ultrasound";
 
 function makeExam(demoCase: CompetitionCase, side: "left" | "right", suffix = "primary"): GlandExam {
-  const media = builtInMediaForCase(demoCase.id);
+  const media = suffix === "primary" || demoCase.id === "case-02" ? builtInMediaForCase(demoCase.id) : { ultrasoundUploads: {}, phaseUploads: {} };
   return { id: `${demoCase.id}-${side}-${suffix}`, gland: demoCase.history.gland, side, reviewed: {}, clinicianVerified: {}, ultrasoundUploads: media.ultrasoundUploads, phaseUploads: media.phaseUploads, cbctImages: [], dicomSeries: [], selectedSeriesUid: "", dicomError: "" };
 }
 
 function createSession(demoCase: CompetitionCase): CaseSession {
-  const primarySide = demoCase.history.laterality === "right" ? "right" : "left";
+  const primarySide = demoCase.id === "case-03" ? "right" : demoCase.history.laterality === "right" ? "right" : "left";
   const exams = [makeExam(demoCase, primarySide)];
   if (demoCase.history.laterality === "bilateral" || demoCase.id === "case-02") exams.push(makeExam(demoCase, primarySide === "left" ? "right" : "left", "comparison"));
   return { history: structuredClone(demoCase.history), step: "history", exams, activeExamId: exams[0].id, activeModality: demoCase.id === "case-04" ? "sialography" : "ultrasound", selectedMediaSlot: mediaSlotsForCase(demoCase.id)[0].id, comparisonMode: false, fusionGenerated: false, fusionImpression: "", fusionReviewed: false, clinicianObservations: {} };
@@ -69,13 +69,13 @@ export function SaliFusionApp() {
   function removeExam() { if (session.exams.length === 1 || !window.confirm(`Remove the ${exam.side} ${exam.gland} examination and its local uploads?`)) return; revokeExam(exam); const remaining = session.exams.filter((item) => item.id !== exam.id); updateSession({ ...session, exams: remaining, activeExamId: remaining[0].id, fusionGenerated: false }); }
   function openImaging(modality: ClinicalModality) { patchSession({ step: "imaging", activeModality: modality }); }
   function reportTitle(kind: CompetitionReportInput["kind"]) { if (demoCase.id === "case-02") return kind === "fusion" ? "Integrated Clinical and Ultrasound Assessment" : kind === "complete" ? "Case 02 Complete Imaging Report" : kind === "ultrasound" ? "Case 02 — Bilateral Parotid Ultrasound and Doppler Examination" : "Case 02 Report"; return kind === "ultrasound" ? "Ultrasound Report" : kind === "sialography" ? "Four-Phase Sialography Report" : kind === "fusion" ? "Fusion Report" : kind === "complete" ? "Complete Case Report" : "CBCT Report"; }
-  function reportFileName(kind: CompetitionReportInput["kind"]) { if (demoCase.id === "case-01") return `SaliFusion_Case01_${kind === "sialography" ? "Sialography" : kind === "complete" ? "Complete" : kind[0].toUpperCase() + kind.slice(1)}_Report.pdf`; if (demoCase.id === "case-02") return `SaliFusion_Case02_${kind === "fusion" ? "Integrated_Assessment" : kind === "complete" ? "Complete_Case" : "Bilateral_Parotid_Ultrasound"}_Report.pdf`; return `SaliFusion_${demoCase.id}_${kind}_Report.pdf`; }
+  function reportFileName(kind: CompetitionReportInput["kind"]) { if (demoCase.id === "case-01") return `SaliFusion_Case01_${kind === "sialography" ? "Sialography" : kind === "complete" ? "Complete" : kind[0].toUpperCase() + kind.slice(1)}_Report.pdf`; if (demoCase.id === "case-02") return `SaliFusion_Case02_${kind === "fusion" ? "Integrated_Assessment" : kind === "complete" ? "Complete_Case" : "Bilateral_Parotid_Ultrasound"}_Report.pdf`; if (demoCase.id === "case-03") return `SaliFusion_Case03_${kind === "sialography" ? "Sialography" : kind === "fusion" ? "Fusion" : kind === "complete" ? "Complete_Case" : "Right_Parotid_Ultrasound"}_Report.pdf`; return `SaliFusion_${demoCase.id}_${kind}_Report.pdf`; }
   async function buildPdf(kind: CompetitionReportInput["kind"]) {
     const reportExam = demoCase.id === "case-02" ? session.exams.find((item) => item.ultrasoundUploads[caseTwoCompositeId]) ?? session.exams.find((item) => item.reviewed.ultrasound) ?? exam : exam;
     const included = (["ultrasound", "sialography", "cbct"] as ClinicalModality[]).filter((modality) => reportExam.reviewed[modality]);
     const { media, warnings } = await collectReportMedia({ kind, demoCase, session, exam: reportExam, includedModalities: included });
     const defaultImpression = demoCase.id === "case-01" ? caseOneFusionDraft : demoCase.id === "case-02" ? caseTwoFusionDraft : demoCase.fusion.interpretation;
-    const reportReviewed = kind === "ultrasound" || kind === "sialography" || kind === "cbct" ? Boolean(reportExam.reviewed[kind]) : Boolean(session.fusionReviewed);
+    const reportReviewed = kind === "ultrasound" || kind === "sialography" || kind === "cbct" ? Boolean(reportExam.clinicianVerified[kind]) : Boolean(session.fusionReviewed);
     const bytes = createCompetitionPdf({ kind, demoCase, history: session.history, exam: reportExam, includedModalities: included, scores: demoCase.scores, media, fusionImpression: session.fusionImpression || defaultImpression, fusionReviewed: session.fusionReviewed, reportReviewed });
     return { bytes, warnings };
   }
@@ -89,7 +89,7 @@ export function SaliFusionApp() {
     <header className="app-header"><button className="brand-button" onClick={() => setScreen("cases")}><Brand /></button><div className="case-identity"><span>Case {demoCase.number}</span><strong>{demoCase.shortTitle}</strong></div><div className="header-actions"><span>{identity.name} · demo</span><button onClick={() => setScreen("cases")}>All cases</button></div></header>
     <nav className="progress-nav" aria-label="Case workflow">{WORKFLOW_STEPS.map((item, index) => <button key={item.id} className={session.step === item.id ? "active" : index < stepIndex ? "complete" : ""} onClick={() => goTo(item.id)}><i>{index < stepIndex ? "✓" : item.number}</i><span>{item.label}</span></button>)}</nav>
     <main className="workflow-main">
-      {session.step === "history" && <HistoryStep demoCase={demoCase} history={session.history} onChange={(history) => updateSession({ ...session, history, exams: session.exams.map((item, index) => index === 0 ? { ...item, gland: history.gland, side: history.laterality === "right" ? "right" : "left" } : item) })} />}
+      {session.step === "history" && <HistoryStep demoCase={demoCase} history={session.history} onChange={(history) => updateSession({ ...session, history, exams: session.exams.map((item, index) => index === 0 ? { ...item, gland: history.gland, side: history.laterality === "bilateral" ? item.side : history.laterality } : item) })} />}
       {session.step === "imaging" && <ImagingStep demoCase={demoCase} session={session} exam={exam} onSession={updateSession} onExam={updateExam} onAddExam={addExam} onRemoveExam={removeExam} />}
       {session.step === "reports" && <ModalityReportsStep demoCase={demoCase} session={session} exam={exam} onPreview={previewPdf} onDownload={downloadPdf} onOpenImaging={openImaging} actionState={reportAction} buildPdf={buildPdf} />}
       {session.step === "fusion" && <FusionStep demoCase={demoCase} session={session} exam={exam} onGenerate={() => patchSession({ fusionGenerated: true, fusionImpression: session.fusionImpression || (demoCase.id === "case-01" ? caseOneFusionDraft : demoCase.id === "case-02" ? caseTwoFusionDraft : demoCase.fusion.interpretation), fusionReviewed: false })} onImpressionChange={(fusionImpression) => patchSession({ fusionImpression, fusionReviewed: false })} onReviewed={() => patchSession({ fusionReviewed: true })} onOpenImaging={openImaging} onPreview={previewPdf} onDownload={downloadPdf} actionState={reportAction} buildPdf={buildPdf} />}

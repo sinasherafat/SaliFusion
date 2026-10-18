@@ -2,11 +2,18 @@ import type { CaseId, DemoMediaSlot, GlandExam, PhaseAsset, SialographyPhase, Up
 
 export const CASE_ONE_ULTRASOUND_PATH = "/demo-cases/case-01/left-submandibular-ultrasound.mp4";
 export const CASE_TWO_COMPOSITE_PATH = "/demo-cases/case-02/bilateral-parotid-composite-ultrasound.mp4";
+export const CASE_THREE_ULTRASOUND_PATH = "/demo-cases/case-03/right-parotid-ultrasound.mp4";
 export const CASE_ONE_PHASE_PATHS: Record<SialographyPhase, string> = {
   precontrast: "/demo-cases/case-01/scout.png",
   ductal: "/demo-cases/case-01/ductal-filling.png",
   acinar: "/demo-cases/case-01/acinar-filling.png",
   evacuation: "/demo-cases/case-01/evacuation-5-minutes.png",
+};
+export const CASE_THREE_PHASE_PATHS: Record<SialographyPhase, string> = {
+  precontrast: "/demo-cases/case-03/scout-precontrast.png",
+  ductal: "/demo-cases/case-03/ductal-filling.png",
+  acinar: "/demo-cases/case-03/acinar-filling.png",
+  evacuation: "/demo-cases/case-03/evacuation.png",
 };
 
 const caseTwoCompositeId = "case-02-bilateral-parotid-composite-ultrasound";
@@ -36,11 +43,22 @@ export function builtInMediaForCase(caseId: CaseId): Pick<GlandExam, "ultrasound
     const composite = builtInUpload(caseTwoCompositeId, "case 2.mov · Built-in Clinical Demo Media", CASE_TWO_COMPOSITE_PATH);
     return { ultrasoundUploads: Object.fromEntries([caseTwoCompositeId, ...caseTwoLegacyIds].map((id) => [id, { ...composite, id }])), phaseUploads: {} };
   }
+  if (caseId === "case-03") {
+    return {
+      ultrasoundUploads: { "case-03-right-parotid-bmode": builtInUpload("case-03-right-parotid-bmode", "ScreenRecording_10-13-2026 13-41-35_1.mov · Built-in Clinical Demo Media", CASE_THREE_ULTRASOUND_PATH) },
+      phaseUploads: {
+        precontrast: builtInPhase("3 1.png · Built-in Clinical Demo Media", CASE_THREE_PHASE_PATHS.precontrast),
+        ductal: builtInPhase("3 2.png · Built-in Clinical Demo Media", CASE_THREE_PHASE_PATHS.ductal),
+        acinar: builtInPhase("3 3.png · Built-in Clinical Demo Media", CASE_THREE_PHASE_PATHS.acinar),
+        evacuation: builtInPhase("3 4.png · Built-in Clinical Demo Media", CASE_THREE_PHASE_PATHS.evacuation),
+      },
+    };
+  }
   return { ultrasoundUploads: {}, phaseUploads: {} };
 }
 
 /**
- * Competition ultrasound slots. Cases 1 and 2 use owner-authorized, de-identified
+ * Competition ultrasound slots. Cases 1 through 3 use owner-authorized, de-identified
  * built-in demo media; later cases preserve their optional local-import slots.
  */
 export const DEMO_MEDIA_SLOTS: DemoMediaSlot[] = [
@@ -50,7 +68,7 @@ export const DEMO_MEDIA_SLOTS: DemoMediaSlot[] = [
   { id: "case-02-right-parotid-bmode-normal", caseId: "case-02", modality: "ultrasound", gland: "parotid", side: "right", mode: "bmode", label: "Right parotid · B-mode", status: "awaiting-upload", sourceRegion: "upper-left" },
   { id: "case-02-left-parotid-doppler-abnormal", caseId: "case-02", modality: "ultrasound", gland: "parotid", side: "left", mode: "doppler", label: "Left parotid · Doppler Imaging", status: "awaiting-upload", sourceRegion: "lower-right" },
   { id: "case-02-right-parotid-doppler-normal", caseId: "case-02", modality: "ultrasound", gland: "parotid", side: "right", mode: "doppler", label: "Right parotid · Doppler Imaging", status: "awaiting-upload", sourceRegion: "upper-right" },
-  { id: "case-03-left-parotid-bmode", caseId: "case-03", modality: "ultrasound", gland: "parotid", side: "left", mode: "bmode", label: "Left parotid · B-mode", status: "awaiting-upload" },
+  { id: "case-03-right-parotid-bmode", caseId: "case-03", modality: "ultrasound", gland: "parotid", side: "right", mode: "bmode", label: "Right parotid · B-mode", mediaUrl: CASE_THREE_ULTRASOUND_PATH, status: "ready" },
   { id: "case-04-provisional-left-submandibular-ultrasound", caseId: "case-04", modality: "ultrasound", gland: "submandibular", side: "left", mode: "bmode", label: "Optional provisional left submandibular · Ultrasound", status: "awaiting-upload" },
   { id: "case-05-right-submandibular-ultrasound", caseId: "case-05", modality: "ultrasound", gland: "submandibular", side: "right", mode: "bmode", label: "Right submandibular · Ultrasound with Doppler", status: "awaiting-upload" },
 ];
