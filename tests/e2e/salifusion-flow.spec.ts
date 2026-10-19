@@ -25,9 +25,26 @@ async function syntheticVideo(page: import("@playwright/test").Page) {
   return Buffer.from(bytes);
 }
 
+async function expectSilentVideo(video: import("@playwright/test").Locator) {
+  await expect.poll(() => video.evaluate((node: HTMLVideoElement) => ({ muted: node.muted, volume: node.volume }))).toEqual({ muted: true, volume: 0 });
+}
+
+test("landing hero presents a two-clinician consultation", async ({ page }) => {
+  await page.goto("/");
+  const hero = page.getByAltText("Female and male clinicians reviewing salivary ultrasound and ductal imaging together at a bright clinical workstation");
+  await expect(hero).toBeVisible();
+  await expect(hero).toHaveAttribute("src", /salifusion-physician-hero/);
+  await expect.poll(() => hero.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)).toBe(true);
+});
+
 test("approved landing entry exposes exactly five focused cases and editable history", async ({ page }) => {
   await enterDemo(page);
-  await expect(page.locator(".case-card")).toHaveCount(5);
+  const cards = page.locator(".case-card");
+  await expect(cards).toHaveCount(5);
+  await expect(cards.locator("header > span")).toHaveText(["Case 01", "Case 02", "Case 03", "Case 04", "Case 05"]);
+  await expect(cards.locator("h2")).toHaveText(Array(5).fill("Clinical demonstration"));
+  await expect(cards.locator(":scope > p")).toHaveText(Array(5).fill("Structured history, imaging review, and reporting workflow."));
+  await expect(page.locator("main.case-selection")).not.toContainText(/Sialolithiasis|Parotitis|Sjögren|Obstructive Duct Disease|Space-Occupying Lesion/i);
   await page.locator(".case-card").first().getByRole("button", { name: /Start Case/ }).click();
   await expect(page.getByRole("heading", { name: "Patient history" })).toBeVisible();
   await page.getByLabel("Patient age").fill("43");
@@ -68,6 +85,7 @@ test("case one built-in media, fusion, and image-bearing reports remain connecte
   await expect(page.getByText(/Built-in Clinical Demo Media · Ultrasound ready · 4\/4 sialography phases ready/)).toBeVisible();
   const video = page.locator("video");
   await expect(video).toHaveAttribute("src", /\/demo-cases\/case-01\/left-submandibular-ultrasound\.mp4$/);
+  await expectSilentVideo(video);
   await page.getByRole("button", { name: "Play / Pause" }).click();
   await expect.poll(() => video.evaluate((node: HTMLVideoElement) => node.currentTime)).toBeGreaterThan(0);
   await page.getByRole("button", { name: "Review educational reference findings" }).click();
@@ -233,6 +251,7 @@ test("case two uses one built-in composite video for four views, independent rep
   await page.getByLabel("Switch gland examination").selectOption({ index: 1 });
   const video = page.locator(".case-two-video-viewport video");
   await expect(video).toHaveAttribute("src", /\/demo-cases\/case-02\/bilateral-parotid-composite-ultrasound\.mp4$/);
+  await expectSilentVideo(video);
   await expect(page.getByRole("tab", { name: /Full Comparison/ })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: /Left B-mode/ }).click();
   await expect(page.getByTestId("case-two-composite-stage")).toHaveClass(/region-lower-left/);
@@ -367,6 +386,7 @@ test("case three preloads right-sided media and completes modality, fusion, and 
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
   const video = page.locator("video");
   await expect(video).toHaveAttribute("src", /\/demo-cases\/case-03\/right-parotid-ultrasound\.mp4$/);
+  await expectSilentVideo(video);
   await expect(page.getByText(/Built-in Clinical Demo Media is served from this protected Preview/)).toBeVisible();
   await page.getByRole("button", { name: "Play / Pause" }).click();
   await expect.poll(() => video.evaluate((node: HTMLVideoElement) => node.currentTime)).toBeGreaterThan(0);
