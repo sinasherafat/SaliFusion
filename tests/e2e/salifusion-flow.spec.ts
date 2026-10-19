@@ -338,7 +338,7 @@ test("case three preloads right-sided media and completes modality, fusion, and 
   const downloadAndInspect = async (scope: import("@playwright/test").Locator, buttonName: string, expectedImages: number, archiveName: string) => {
     const downloadPromise = page.waitForEvent("download");
     await scope.getByRole("button", { name: buttonName, exact: true }).click();
-    const download = await downloadPromise; const path = await download.path(); expect(path).toBeTruthy();
+    const download = await downloadPromise; expect(download.suggestedFilename()).toBe(archiveName); const path = await download.path(); expect(path).toBeTruthy();
     const bytes = await readFile(path!); const source = bytes.toString("latin1");
     expect(source.startsWith("%PDF-1.4")).toBe(true);
     expect((source.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(expectedImages);
@@ -384,16 +384,25 @@ test("case three preloads right-sided media and completes modality, fusion, and 
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
   const ultrasoundReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Ultrasound Report" }) });
   const sialographyReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Four-Phase Sialography Report" }) });
-  await previewPdf(ultrasoundReport, "View PDF", "Ultrasound Report"); await downloadAndInspect(ultrasoundReport, "Download PDF", 1, "SaliFusion_Case03_Ultrasound_Report.pdf");
-  await previewPdf(sialographyReport, "View PDF", "Four-Phase Sialography Report"); await downloadAndInspect(sialographyReport, "Download PDF", 4, "SaliFusion_Case03_Sialography_Report.pdf");
+  await previewPdf(ultrasoundReport, "View Ultrasound PDF", "Ultrasound Report"); await downloadAndInspect(ultrasoundReport, "Download Ultrasound PDF", 1, "SaliFusion_Case03_Ultrasound.pdf");
+  await previewPdf(sialographyReport, "View Sialography PDF", "Four-Phase Sialography Report"); await downloadAndInspect(sialographyReport, "Download Sialography PDF", 4, "SaliFusion_Case03_Sialography.pdf");
   await page.getByRole("button", { name: /Continue to Fusion/ }).click();
+  await expect(page.getByLabel("Case 3 fusion prerequisites")).toContainText("Media available");
+  await expect(page.getByLabel("Case 3 fusion prerequisites")).toContainText("4 of 4 phases available");
+  await expect(page.getByLabel("Case 3 fusion prerequisites")).toContainText("Clinician review confirmed");
   await expect(page.getByRole("button", { name: "Generate Fusion Analysis" })).toBeEnabled(); await page.getByRole("button", { name: "Generate Fusion Analysis" }).click();
-  await expect(page.getByText(/findings favor Sjögren syndrome as the leading diagnostic consideration/i)).toBeVisible();
+  await expect(page.getByText("Despite only subtle and nonspecific parenchymal findings on ultrasound, right parotid sialography demonstrates relatively uniform punctate sialectasia and incomplete contrast evacuation at ten minutes. In conjunction with xerostomia and xerophthalmia, the combined findings favor Sjögren-related salivary gland involvement. Previous viral sialadenitis remains an alternative differential consideration. Further clinical, serological, and appropriate additional salivary gland assessment are recommended.", { exact: true })).toBeVisible();
   await expect(page.getByText(/Source timing discrepancy|Source timing limitation|five-minute statement/i)).toHaveCount(0);
-  await previewPdf(page.locator(".fusion-pdf-actions"), "View Fusion PDF", "Fusion Report"); await downloadAndInspect(page.locator(".fusion-pdf-actions"), "Download Fusion PDF", 5, "SaliFusion_Case03_Fusion_Report.pdf");
+  const inlineFusion = page.getByRole("region", { name: "SaliFusion — Case 03 Integrated Right Parotid Assessment inline PDF" });
+  await expect(inlineFusion.getByText("Professional PDF ready")).toBeVisible(); await expect(inlineFusion.locator("canvas").first()).toBeVisible();
+  await expect(inlineFusion.getByRole("button", { name: "Print Fusion Report" })).toBeEnabled();
+  await previewPdf(inlineFusion, "View Fusion PDF", "Fusion Report"); await downloadAndInspect(inlineFusion, "Download Fusion PDF", 5, "SaliFusion_Case03_Fusion.pdf");
   await page.getByRole("button", { name: "Mark Reviewed" }).click(); await page.getByRole("button", { name: /Continue to Final Report/ }).click();
   const completeCard = page.locator(".report-center-grid article").filter({ has: page.getByRole("heading", { name: "Complete Case Report" }) });
-  await expect(completeCard).toContainText("Available"); await previewPdf(completeCard, "View PDF", "Complete Case Report"); await downloadAndInspect(completeCard, "Download PDF", 5, "SaliFusion_Case03_Complete_Case_Report.pdf");
+  await expect(completeCard).toContainText("Available"); await previewPdf(completeCard, "View Complete Case PDF", "Complete Case Report"); await downloadAndInspect(completeCard, "Download Complete Case PDF", 5, "SaliFusion_Case03_Complete_Report.pdf");
+  const inlineComplete = page.getByRole("region", { name: "SaliFusion — Case 03 Complete Imaging Report inline PDF" });
+  await expect(inlineComplete.getByText("Professional PDF ready")).toBeVisible(); await expect(inlineComplete.locator("canvas").first()).toBeVisible();
+  await expect(inlineComplete.getByRole("button", { name: "View Complete Case PDF" })).toBeEnabled(); await expect(inlineComplete.getByRole("button", { name: "Download Complete Case PDF" })).toBeEnabled(); await expect(inlineComplete.getByRole("button", { name: "Print Complete Report" })).toBeEnabled();
   expect(writes).toEqual([]);
 });
 

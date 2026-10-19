@@ -166,8 +166,11 @@ function addFusion(layout: Layout, input: CompetitionReportInput) {
     layout.labelValue("Ductal filling", input.demoCase.sialographyPhases.ductal.interpretation);
     layout.labelValue("Acinar / parenchymal filling", input.demoCase.sialographyPhases.acinar.interpretation);
     layout.labelValue("Evacuation and functional clearance", input.demoCase.sialographyPhases.evacuation.interpretation);
+    layout.heading("Cross-Modal Integration"); layout.list(input.demoCase.fusion.observedFindings);
+    layout.heading("Complementary Diagnostic Findings"); layout.paragraph("The subtle and nonspecific ultrasound appearance does not exclude early salivary-gland involvement. The relatively uniform punctate sialographic pattern and delayed ten-minute contrast clearance provide complementary ductoacinar and functional information in the context of sicca symptoms.");
     layout.heading("Final Imaging Impression"); layout.paragraph(impression, { size: 11, font: "F2" });
     layout.heading("Differential Diagnoses"); layout.list(input.demoCase.fusion.differentials.map((item) => `${item.label}: ${item.rationale}`));
+    layout.heading("Diagnostic Limitations"); layout.list(input.demoCase.fusion.limitations);
     layout.heading("Clinical Recommendations"); layout.list(input.demoCase.fusion.recommendations);
     layout.heading("Educational Decision Support"); layout.paragraph(SCORE_DISCLAIMER, { size: 8.6, color: color.muted });
     return;

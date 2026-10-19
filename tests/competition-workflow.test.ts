@@ -95,7 +95,7 @@ describe("independent four-phase sialography source of truth", () => {
     expect(item.sialographyPhases.evacuation.timing).toBe("10 minutes");
     expect(item.sialographyPhases.evacuation.interpretation).toMatch(/Persistent intraglandular contrast retention.*incomplete contrast evacuation.*10 minutes.*delayed ductal clearance.*impaired glandular drainage function/i);
     expect(item.sialography.interpretation).toMatch(/Persistent contrast retention at 10 minutes.*delayed evacuation.*impaired glandular drainage/i);
-    expect(item.fusion.interpretation).toMatch(/incomplete contrast evacuation at 10 minutes.*favor Sjögren syndrome.*leading diagnostic consideration/i);
+    expect(item.fusion.interpretation).toBe("Despite only subtle and nonspecific parenchymal findings on ultrasound, right parotid sialography demonstrates relatively uniform punctate sialectasia and incomplete contrast evacuation at ten minutes. In conjunction with xerostomia and xerophthalmia, the combined findings favor Sjögren-related salivary gland involvement. Previous viral sialadenitis remains an alternative differential consideration. Further clinical, serological, and appropriate additional salivary gland assessment are recommended.");
     expect([...item.sialography.limitations, ...item.fusion.limitations, ...item.sialographyPhases.evacuation.limitations].join(" ")).not.toMatch(/brief|discrepancy|conflict|corrected media|timing confirmation/i);
   });
 
@@ -260,9 +260,9 @@ describe("fusion, provenance, and reports", () => {
     if (kind !== "ultrasound") expect(text).toContain("10 minutes");
     expect(text).not.toMatch(/Source Timing (?:Discrepancy|Limitation)|task brief|separate task brief|five-minute claim|corrected source media|timing confirmation|conflicting five-minute/i);
     if (kind === "fusion" || kind === "complete") {
-      expect(text).toContain("these findings favor Sjogren");
-      expect(text).toContain("syndrome as the leading diagnostic consideration");
-      expect(text).toContain("incomplete contrast evacuation at 10");
+      expect(text).toContain("combined findings favor Sjogren-related salivary gland involvement");
+      expect(text).toContain("Previous viral");
+      expect(text).toContain("alternative differential consideration");
     }
   });
 });
