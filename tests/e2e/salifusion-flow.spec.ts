@@ -101,10 +101,11 @@ test("case one built-in media, fusion, and image-bearing reports remain connecte
     await expect(dialog).toBeHidden();
   }
 
-  async function downloadAndInspect(scope: import("@playwright/test").Locator, expectedImages: number, expectedText?: string, buttonName = "Download PDF") {
+  async function downloadAndInspect(scope: import("@playwright/test").Locator, expectedImages: number, expectedFilename: string, expectedText?: string, buttonName = "Download PDF") {
     const downloadPromise = page.waitForEvent("download");
     await scope.getByRole("button", { name: buttonName }).click();
     const download = await downloadPromise; const path = await download.path(); expect(path).toBeTruthy();
+    expect(download.suggestedFilename()).toBe(expectedFilename);
     const bytes = await readFile(path!); const source = bytes.toString("latin1");
     expect(source.startsWith("%PDF-1.4")).toBe(true);
     expect((source.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(expectedImages);
@@ -126,9 +127,9 @@ test("case one built-in media, fusion, and image-bearing reports remain connecte
   await expect(sialographyReport.locator(".phase-thumbnail-row img")).toHaveCount(4);
   await expect(page.getByText("No CBCT study provided")).toBeVisible();
   await previewPdf(ultrasoundReport, "Ultrasound Report");
-  await downloadAndInspect(ultrasoundReport, 1);
+  await downloadAndInspect(ultrasoundReport, 1, "SaliFusion_Case01_Ultrasound.pdf", undefined, "Download Ultrasound PDF");
   await previewPdf(sialographyReport, "Four-Phase Sialography Report");
-  await downloadAndInspect(sialographyReport, 4);
+  await downloadAndInspect(sialographyReport, 4, "SaliFusion_Case01_Sialography.pdf", undefined, "Download Sialography PDF");
   await page.getByRole("button", { name: /Continue to Fusion/ }).click();
   await page.getByRole("button", { name: "Generate Fusion Analysis" }).click();
   await expect(page.getByRole("heading", { name: "Integrated Multimodal Assessment" })).toBeVisible();
@@ -147,15 +148,15 @@ test("case one built-in media, fusion, and image-bearing reports remain connecte
   expect(fusionPdfText).toContain(editedImpression);
   await fusionDialog.getByRole("button", { name: "Close PDF preview" }).click();
   const fusionActions = page.locator(".fusion-pdf-actions");
-  await downloadAndInspect(fusionActions, 5, editedImpression, "Download Fusion PDF");
+  await downloadAndInspect(fusionActions, 5, "SaliFusion_Case01_Fusion.pdf", editedImpression, "Download Fusion PDF");
   await page.getByRole("button", { name: /Continue to Final Report/ }).click();
   await expect(page.getByRole("heading", { name: "SaliFusion Reports" })).toBeVisible();
   const completeReport = page.locator(".report-center-grid article").filter({ has: page.getByRole("heading", { name: "Complete Case Report" }) });
   await previewPdf(completeReport, "Complete Case Report");
-  await downloadAndInspect(completeReport, 5, editedImpression);
+  await downloadAndInspect(completeReport, 5, "SaliFusion_Case01_Complete_Report.pdf", editedImpression, "Download Complete Case PDF");
   const completeInline = page.getByLabel("SaliFusion — Case 01 Complete Imaging Report inline PDF");
   await expect(completeInline.getByRole("button", { name: "View Complete PDF" })).toBeEnabled();
-  await expect(completeInline.getByRole("button", { name: "Download Complete PDF" })).toBeEnabled();
+  await expect(completeInline.getByRole("button", { name: "Download Complete Case PDF" })).toBeEnabled();
   await expect(completeInline.getByRole("button", { name: "Print Complete Report" })).toBeEnabled();
   expect(writes).toEqual([]);
 });
