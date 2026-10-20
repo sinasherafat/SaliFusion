@@ -25,9 +25,26 @@ async function syntheticVideo(page: import("@playwright/test").Page) {
   return Buffer.from(bytes);
 }
 
+async function expectSilentVideo(video: import("@playwright/test").Locator) {
+  await expect.poll(() => video.evaluate((node: HTMLVideoElement) => ({ muted: node.muted, volume: node.volume }))).toEqual({ muted: true, volume: 0 });
+}
+
+test("landing hero presents a two-clinician consultation", async ({ page }) => {
+  await page.goto("/");
+  const hero = page.getByAltText("Female and male clinicians reviewing salivary ultrasound and ductal imaging together at a bright clinical workstation");
+  await expect(hero).toBeVisible();
+  await expect(hero).toHaveAttribute("src", /salifusion-physician-hero/);
+  await expect.poll(() => hero.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)).toBe(true);
+});
+
 test("approved landing entry exposes exactly five focused cases and editable history", async ({ page }) => {
   await enterDemo(page);
-  await expect(page.locator(".case-card")).toHaveCount(5);
+  const cards = page.locator(".case-card");
+  await expect(cards).toHaveCount(5);
+  await expect(cards.locator("header > span")).toHaveText(["Case 01", "Case 02", "Case 03", "Case 04", "Case 05"]);
+  await expect(cards.locator("h2")).toHaveText(Array(5).fill("Clinical demonstration"));
+  await expect(cards.locator(":scope > p")).toHaveText(Array(5).fill("Structured history, imaging review, and reporting workflow."));
+  await expect(page.locator("main.case-selection")).not.toContainText(/Sialolithiasis|Parotitis|Sjögren|Obstructive Duct Disease|Space-Occupying Lesion/i);
   await page.locator(".case-card").first().getByRole("button", { name: /Start Case/ }).click();
   await expect(page.getByRole("heading", { name: "Patient history" })).toBeVisible();
   await page.getByLabel("Patient age").fill("43");
@@ -68,6 +85,7 @@ test("case one built-in media, fusion, and image-bearing reports remain connecte
   await expect(page.getByText(/Built-in Clinical Demo Media · Ultrasound ready · 4\/4 sialography phases ready/)).toBeVisible();
   const video = page.locator("video");
   await expect(video).toHaveAttribute("src", /\/demo-cases\/case-01\/left-submandibular-ultrasound\.mp4$/);
+  await expectSilentVideo(video);
   await page.getByRole("button", { name: "Play / Pause" }).click();
   await expect.poll(() => video.evaluate((node: HTMLVideoElement) => node.currentTime)).toBeGreaterThan(0);
   await page.getByRole("button", { name: "Review educational reference findings" }).click();
@@ -101,10 +119,11 @@ test("case one built-in media, fusion, and image-bearing reports remain connecte
     await expect(dialog).toBeHidden();
   }
 
-  async function downloadAndInspect(scope: import("@playwright/test").Locator, expectedImages: number, expectedText?: string, buttonName = "Download PDF") {
+  async function downloadAndInspect(scope: import("@playwright/test").Locator, expectedImages: number, expectedFilename: string, expectedText?: string, buttonName = "Download PDF") {
     const downloadPromise = page.waitForEvent("download");
     await scope.getByRole("button", { name: buttonName }).click();
     const download = await downloadPromise; const path = await download.path(); expect(path).toBeTruthy();
+    expect(download.suggestedFilename()).toBe(expectedFilename);
     const bytes = await readFile(path!); const source = bytes.toString("latin1");
     expect(source.startsWith("%PDF-1.4")).toBe(true);
     expect((source.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(expectedImages);
@@ -126,9 +145,9 @@ test("case one built-in media, fusion, and image-bearing reports remain connecte
   await expect(sialographyReport.locator(".phase-thumbnail-row img")).toHaveCount(4);
   await expect(page.getByText("No CBCT study provided")).toBeVisible();
   await previewPdf(ultrasoundReport, "Ultrasound Report");
-  await downloadAndInspect(ultrasoundReport, 1);
+  await downloadAndInspect(ultrasoundReport, 1, "SaliFusion_Case01_Ultrasound.pdf", undefined, "Download Ultrasound PDF");
   await previewPdf(sialographyReport, "Four-Phase Sialography Report");
-  await downloadAndInspect(sialographyReport, 4);
+  await downloadAndInspect(sialographyReport, 4, "SaliFusion_Case01_Sialography.pdf", undefined, "Download Sialography PDF");
   await page.getByRole("button", { name: /Continue to Fusion/ }).click();
   await page.getByRole("button", { name: "Generate Fusion Analysis" }).click();
   await expect(page.getByRole("heading", { name: "Integrated Multimodal Assessment" })).toBeVisible();
@@ -147,15 +166,15 @@ test("case one built-in media, fusion, and image-bearing reports remain connecte
   expect(fusionPdfText).toContain(editedImpression);
   await fusionDialog.getByRole("button", { name: "Close PDF preview" }).click();
   const fusionActions = page.locator(".fusion-pdf-actions");
-  await downloadAndInspect(fusionActions, 5, editedImpression, "Download Fusion PDF");
+  await downloadAndInspect(fusionActions, 5, "SaliFusion_Case01_Fusion.pdf", editedImpression, "Download Fusion PDF");
   await page.getByRole("button", { name: /Continue to Final Report/ }).click();
   await expect(page.getByRole("heading", { name: "SaliFusion Reports" })).toBeVisible();
   const completeReport = page.locator(".report-center-grid article").filter({ has: page.getByRole("heading", { name: "Complete Case Report" }) });
   await previewPdf(completeReport, "Complete Case Report");
-  await downloadAndInspect(completeReport, 5, editedImpression);
+  await downloadAndInspect(completeReport, 5, "SaliFusion_Case01_Complete_Report.pdf", editedImpression, "Download Complete Case PDF");
   const completeInline = page.getByLabel("SaliFusion — Case 01 Complete Imaging Report inline PDF");
   await expect(completeInline.getByRole("button", { name: "View Complete PDF" })).toBeEnabled();
-  await expect(completeInline.getByRole("button", { name: "Download Complete PDF" })).toBeEnabled();
+  await expect(completeInline.getByRole("button", { name: "Download Complete Case PDF" })).toBeEnabled();
   await expect(completeInline.getByRole("button", { name: "Print Complete Report" })).toBeEnabled();
   expect(writes).toEqual([]);
 });
@@ -232,6 +251,7 @@ test("case two uses one built-in composite video for four views, independent rep
   await page.getByLabel("Switch gland examination").selectOption({ index: 1 });
   const video = page.locator(".case-two-video-viewport video");
   await expect(video).toHaveAttribute("src", /\/demo-cases\/case-02\/bilateral-parotid-composite-ultrasound\.mp4$/);
+  await expectSilentVideo(video);
   await expect(page.getByRole("tab", { name: /Full Comparison/ })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: /Left B-mode/ }).click();
   await expect(page.getByTestId("case-two-composite-stage")).toHaveClass(/region-lower-left/);
@@ -337,7 +357,7 @@ test("case three preloads right-sided media and completes modality, fusion, and 
   const downloadAndInspect = async (scope: import("@playwright/test").Locator, buttonName: string, expectedImages: number, archiveName: string) => {
     const downloadPromise = page.waitForEvent("download");
     await scope.getByRole("button", { name: buttonName, exact: true }).click();
-    const download = await downloadPromise; const path = await download.path(); expect(path).toBeTruthy();
+    const download = await downloadPromise; expect(download.suggestedFilename()).toBe(archiveName); const path = await download.path(); expect(path).toBeTruthy();
     const bytes = await readFile(path!); const source = bytes.toString("latin1");
     expect(source.startsWith("%PDF-1.4")).toBe(true);
     expect((source.match(/\/Subtype \/Image/g) ?? [])).toHaveLength(expectedImages);
@@ -366,6 +386,7 @@ test("case three preloads right-sided media and completes modality, fusion, and 
   await page.getByRole("button", { name: /Continue to Imaging/ }).click();
   const video = page.locator("video");
   await expect(video).toHaveAttribute("src", /\/demo-cases\/case-03\/right-parotid-ultrasound\.mp4$/);
+  await expectSilentVideo(video);
   await expect(page.getByText(/Built-in Clinical Demo Media is served from this protected Preview/)).toBeVisible();
   await page.getByRole("button", { name: "Play / Pause" }).click();
   await expect.poll(() => video.evaluate((node: HTMLVideoElement) => node.currentTime)).toBeGreaterThan(0);
@@ -383,16 +404,25 @@ test("case three preloads right-sided media and completes modality, fusion, and 
   await page.getByRole("button", { name: /Continue to Modality Reports/ }).click();
   const ultrasoundReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Ultrasound Report" }) });
   const sialographyReport = page.locator(".clinical-report-card").filter({ has: page.getByRole("heading", { name: "Four-Phase Sialography Report" }) });
-  await previewPdf(ultrasoundReport, "View PDF", "Ultrasound Report"); await downloadAndInspect(ultrasoundReport, "Download PDF", 1, "SaliFusion_Case03_Ultrasound_Report.pdf");
-  await previewPdf(sialographyReport, "View PDF", "Four-Phase Sialography Report"); await downloadAndInspect(sialographyReport, "Download PDF", 4, "SaliFusion_Case03_Sialography_Report.pdf");
+  await previewPdf(ultrasoundReport, "View Ultrasound PDF", "Ultrasound Report"); await downloadAndInspect(ultrasoundReport, "Download Ultrasound PDF", 1, "SaliFusion_Case03_Ultrasound.pdf");
+  await previewPdf(sialographyReport, "View Sialography PDF", "Four-Phase Sialography Report"); await downloadAndInspect(sialographyReport, "Download Sialography PDF", 4, "SaliFusion_Case03_Sialography.pdf");
   await page.getByRole("button", { name: /Continue to Fusion/ }).click();
+  await expect(page.getByLabel("Case 3 fusion prerequisites")).toContainText("Media available");
+  await expect(page.getByLabel("Case 3 fusion prerequisites")).toContainText("4 of 4 phases available");
+  await expect(page.getByLabel("Case 3 fusion prerequisites")).toContainText("Clinician review confirmed");
   await expect(page.getByRole("button", { name: "Generate Fusion Analysis" })).toBeEnabled(); await page.getByRole("button", { name: "Generate Fusion Analysis" }).click();
-  await expect(page.getByText(/findings favor Sjögren syndrome as the leading diagnostic consideration/i)).toBeVisible();
+  await expect(page.getByText("Despite only subtle and nonspecific parenchymal findings on ultrasound, right parotid sialography demonstrates relatively uniform punctate sialectasia and incomplete contrast evacuation at ten minutes. In conjunction with xerostomia and xerophthalmia, the combined findings favor Sjögren-related salivary gland involvement. Previous viral sialadenitis remains an alternative differential consideration. Further clinical, serological, and appropriate additional salivary gland assessment are recommended.", { exact: true })).toBeVisible();
   await expect(page.getByText(/Source timing discrepancy|Source timing limitation|five-minute statement/i)).toHaveCount(0);
-  await previewPdf(page.locator(".fusion-pdf-actions"), "View Fusion PDF", "Fusion Report"); await downloadAndInspect(page.locator(".fusion-pdf-actions"), "Download Fusion PDF", 5, "SaliFusion_Case03_Fusion_Report.pdf");
+  const inlineFusion = page.getByRole("region", { name: "SaliFusion — Case 03 Integrated Right Parotid Assessment inline PDF" });
+  await expect(inlineFusion.getByText("Professional PDF ready")).toBeVisible(); await expect(inlineFusion.locator("canvas").first()).toBeVisible();
+  await expect(inlineFusion.getByRole("button", { name: "Print Fusion Report" })).toBeEnabled();
+  await previewPdf(inlineFusion, "View Fusion PDF", "Fusion Report"); await downloadAndInspect(inlineFusion, "Download Fusion PDF", 5, "SaliFusion_Case03_Fusion.pdf");
   await page.getByRole("button", { name: "Mark Reviewed" }).click(); await page.getByRole("button", { name: /Continue to Final Report/ }).click();
   const completeCard = page.locator(".report-center-grid article").filter({ has: page.getByRole("heading", { name: "Complete Case Report" }) });
-  await expect(completeCard).toContainText("Available"); await previewPdf(completeCard, "View PDF", "Complete Case Report"); await downloadAndInspect(completeCard, "Download PDF", 5, "SaliFusion_Case03_Complete_Case_Report.pdf");
+  await expect(completeCard).toContainText("Available"); await previewPdf(completeCard, "View Complete Case PDF", "Complete Case Report"); await downloadAndInspect(completeCard, "Download Complete Case PDF", 5, "SaliFusion_Case03_Complete_Report.pdf");
+  const inlineComplete = page.getByRole("region", { name: "SaliFusion — Case 03 Complete Imaging Report inline PDF" });
+  await expect(inlineComplete.getByText("Professional PDF ready")).toBeVisible(); await expect(inlineComplete.locator("canvas").first()).toBeVisible();
+  await expect(inlineComplete.getByRole("button", { name: "View Complete Case PDF" })).toBeEnabled(); await expect(inlineComplete.getByRole("button", { name: "Download Complete Case PDF" })).toBeEnabled(); await expect(inlineComplete.getByRole("button", { name: "Print Complete Report" })).toBeEnabled();
   expect(writes).toEqual([]);
 });
 
